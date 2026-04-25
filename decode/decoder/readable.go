@@ -134,8 +134,74 @@ func formatConfigMemberID(flags, memberID uint8) string {
 	return fmt.Sprintf("flags=0x%02X member-id=%d", flags, memberID)
 }
 
+// tspInfo describes a known TSP register
+type tspInfo struct {
+	Name   string
+	Unit   string
+	Offset int  // subtract this from value to get real value (e.g. temperatures offset by 100)
+	Scale  int  // multiply value by this to get real value (e.g. bypass temps × 2)
+	Is16Hi bool // true if this is the HI byte of a 16-bit pair (skip display)
+}
+
+// Known TSP registers for Wolf CWL / Brink Renovent HR / Viessmann Vitovent 300
+var tspRegistry = map[uint8]tspInfo{
+	0:  {"Airflow step 1", "m³/h", 0, 0, false},
+	1:  {"Airflow step 1 (HI)", "", 0, 0, true},
+	2:  {"Airflow step 2", "m³/h", 0, 0, false},
+	3:  {"Airflow step 2 (HI)", "", 0, 0, true},
+	4:  {"Airflow step 3", "m³/h", 0, 0, false},
+	5:  {"Airflow step 3 (HI)", "", 0, 0, true},
+	6:  {"Min. outdoor temp bypass", "°C", 0, -2, false},
+	7:  {"Min. indoor temp bypass", "°C", 0, -2, false},
+	11: {"Imbalance", "%", 100, 0, false},
+	17: {"Pressure/fan mode", "", 0, 0, false},
+	18: {"Bypass config", "", 0, 0, false},
+	19: {"Hysteresis/preheater", "", 0, 0, false},
+	20: {"Config I10", "", 0, 0, false},
+	23: {"Filter message", "", 0, 0, false},
+	24: {"PCB config", "", 0, 0, false},
+	48: {"Device config", "", 0, 0, false},
+	49: {"Device config (HI)", "", 0, 0, true},
+	52: {"Current volume", "m³/h", 0, 0, false},
+	53: {"Current volume (HI)", "", 0, 0, true},
+	54: {"Bypass status", "", 0, 0, false},
+	55: {"Outdoor temperature", "°C", 100, 0, false},
+	56: {"Indoor temperature", "°C", 100, 0, false},
+	60: {"Flow value", "", 0, 0, false},
+	61: {"Flow value (HI)", "", 0, 0, true},
+	62: {"Output volume", "m³/h", 0, 0, false},
+	63: {"Output volume (HI)", "", 0, 0, true},
+	64: {"Input duct pressure", "Pa", 0, 0, false},
+	65: {"Input duct pressure (HI)", "", 0, 0, true},
+	66: {"Output duct pressure", "Pa", 0, 0, false},
+	67: {"Output duct pressure (HI)", "", 0, 0, true},
+	68: {"Frost protection", "", 0, 0, false},
+}
+
 func formatTSP(index, value uint8) string {
-	return fmt.Sprintf("[%d] = %d", index, value)
+	info, ok := tspRegistry[index]
+	if !ok {
+		return fmt.Sprintf("[%d] = %d", index, value)
+	}
+
+	if info.Is16Hi {
+		return fmt.Sprintf("[%d] = %d", index, value)
+	}
+
+	displayVal := int(value)
+	if info.Scale > 0 {
+		displayVal = displayVal * info.Scale
+	} else if info.Scale < 0 {
+		displayVal = displayVal / (-info.Scale)
+	}
+	if info.Offset > 0 {
+		displayVal = displayVal - info.Offset
+	}
+
+	if info.Unit != "" {
+		return fmt.Sprintf("[%d] %s: %d %s", index, info.Name, displayVal, info.Unit)
+	}
+	return fmt.Sprintf("[%d] %s: %d", index, info.Name, displayVal)
 }
 
 var statusVHBitsHI = []string{
@@ -392,6 +458,14 @@ func DecodeReadable(samples []Sample) {
 	var order []string
 
 	for _, ex := range result.Exchanges {
+		// Skip HI byte TSP entries (they're part of 16-bit pairs)
+		if (ex.DataID == 89 || ex.DataID == 11) {
+			tspIdx := uint8(ex.Value >> 8)
+			if info, ok := tspRegistry[tspIdx]; ok && info.Is16Hi {
+				continue
+			}
+		}
+
 		key := ExchangeKey(ex)
 		val := FormatExchangeFull(ex)
 		se := formatStatusExchange(ex)
