@@ -59,10 +59,8 @@ void broadcastLogLocal(const String& timestamp, const String& message) {
 // =============================================================================
 
 static void setupApiEndpoints() {
-    // Login
-    server.on("/api/login", HTTP_POST, [](AsyncWebServerRequest* request) {},
-              nullptr,
-              [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+    // Login handler (shared by both paths)
+    auto loginHandler = [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
         JsonDocument doc;
         deserializeJson(doc, data, len);
         String username = doc["username"] | "";
@@ -75,7 +73,12 @@ static void setupApiEndpoints() {
         } else {
             request->send(401, "application/json", "{\"error\":\"Invalid credentials\"}");
         }
-    });
+    };
+    auto loginNoop = [](AsyncWebServerRequest* request) {};
+
+    // Login (two paths: /api/login for web UI, /api/auth/login for OTA script)
+    server.on("/api/login", HTTP_POST, loginNoop, nullptr, loginHandler);
+    server.on("/api/auth/login", HTTP_POST, loginNoop, nullptr, loginHandler);
 
     // Get config
     server.on("/api/config", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -200,6 +203,33 @@ static void setupApiEndpoints() {
                           log("OTA: Success (" + String(index + len) + " bytes)");
                       } else {
                           log("OTA: Failed");
+                      }
+                  }
+              });
+
+    // OTA filesystem upload (LittleFS)
+    server.on("/api/ota/filesystem", HTTP_POST,
+              [](AsyncWebServerRequest* request) {
+                  if (Update.hasError()) {
+                      request->send(500, "application/json", "{\"error\":\"Filesystem update failed\"}");
+                  } else {
+                      request->send(200, "application/json", "{\"success\":true,\"message\":\"Rebooting...\"}");
+                      delay(500);
+                      ESP.restart();
+                  }
+              },
+              [](AsyncWebServerRequest* request, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
+                  if (!isAuthenticated(request)) return;
+                  if (!index) {
+                      log("OTA: Filesystem start (" + filename + ")");
+                      Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS);
+                  }
+                  Update.write(data, len);
+                  if (final) {
+                      if (Update.end(true)) {
+                          log("OTA: Filesystem success (" + String(index + len) + " bytes)");
+                      } else {
+                          log("OTA: Filesystem failed");
                       }
                   }
               });

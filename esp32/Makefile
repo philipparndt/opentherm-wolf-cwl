@@ -73,7 +73,7 @@ help:
 # Build targets
 # ==========================================
 
-build: build-firmware
+build: build-web build-firmware build-fs
 	@echo ""
 	@echo "$(GREEN)Build complete!$(NC)"
 
