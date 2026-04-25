@@ -6,7 +6,7 @@
 ._*
 
 # Custom folder icons
-Icon
+Icon
 
 # Volume root files
 .DocumentRevisions-V100
@@ -39,3 +39,7 @@ go.work.sum
 *.sal
 *.csv
 decode/decode
+esp32/.venv
+esp32/.pio
+esp32/data
+esp32/web/node_modules

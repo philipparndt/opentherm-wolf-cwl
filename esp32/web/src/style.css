@@ -1,0 +1,41 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+.container { max-width: 600px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 1.4em; margin-bottom: 16px; }
+h2 { font-size: 1.1em; margin: 16px 0 8px; color: #555; }
+
+.card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.card h3 { font-size: 0.9em; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.stat { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+.stat:last-child { border-bottom: none; }
+.stat .label { color: #666; }
+.stat .value { font-weight: 600; }
+.stat .value.fault { color: #e74c3c; }
+.stat .value.ok { color: #27ae60; }
+
+.level-buttons { display: flex; gap: 8px; margin: 8px 0; }
+.level-btn { flex: 1; padding: 10px; border: 2px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.85em; text-align: center; transition: all 0.2s; }
+.level-btn:hover { border-color: #3498db; }
+.level-btn.active { background: #3498db; color: #fff; border-color: #3498db; }
+
+.tabs { display: flex; border-bottom: 2px solid #eee; margin-bottom: 16px; }
+.tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: #888; }
+.tab.active { color: #3498db; border-bottom-color: #3498db; }
+
+input[type="text"], input[type="password"], input[type="number"] { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; margin: 4px 0 12px; font-size: 0.9em; }
+label { font-size: 0.85em; color: #666; }
+button { padding: 10px 20px; background: #3498db; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
+button:hover { background: #2980b9; }
+button.danger { background: #e74c3c; }
+button.danger:hover { background: #c0392b; }
+
+.login { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80vh; }
+.login .card { width: 100%; max-width: 360px; }
+
+.toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.toggle input[type="checkbox"] { width: 18px; height: 18px; }
+
+.msg { padding: 8px 12px; border-radius: 4px; margin: 8px 0; font-size: 0.85em; }
+.msg.error { background: #fde8e8; color: #e74c3c; }
+.msg.success { background: #e8fde8; color: #27ae60; }
