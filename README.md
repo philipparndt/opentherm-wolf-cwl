@@ -100,50 +100,51 @@ The BM remote cycles through TSP registers via Data ID 89, reading one index per
 
 TSP values did **not** change when switching ventilation levels or toggling bypass. Ventilation is controlled via ID 71, bypass via ID 70. TSPs hold configuration and live diagnostic data.
 
-Many TSP indices come in even/odd pairs where the odd index is 0, suggesting 16-bit values split across two bytes (even=LO, odd=HI).
+The Wolf CWL is OEM-identical to the **Brink Renovent HR** and **Viessmann Vitovent 300**. The TSP register map from the [Brink Renovent OpenTherm project](https://github.com/raf1000/brink_openhab) applies directly.
 
-The following TSP indices have been observed:
+Many indices come in even/odd pairs for 16-bit values (even=LO, odd=HI byte).
 
-#### Airflow Configuration (likely m³/h)
+#### Airflow Configuration (m³/h)
 
-| TSP Index | Value | Interpretation |
-|-----------|-------|----------------|
-| 0, 1 | 100, 0 | Airflow rate for level 1 (Reduced): **100 m³/h** |
-| 2, 3 | 130, 0 | Airflow rate for level 2 (Normal): **130 m³/h** |
-| 4, 5 | 195, 0 | Airflow rate for level 3 (Party): **195 m³/h** |
-| 6 | 20 | Minimum airflow or temperature threshold |
-| 11 | 100 | Max ventilation % or reference value |
+| TSP Index | Brink name | Value | Description |
+|-----------|------------|-------|-------------|
+| 0, 1 | U1 | 100, 0 | Airflow rate step 1 (Reduced): **100 m³/h** |
+| 2, 3 | U2 | 130, 0 | Airflow rate step 2 (Normal): **130 m³/h** |
+| 4, 5 | U3 | 195, 0 | Airflow rate step 3 (Party): **195 m³/h** |
 
-**Note:** These airflow values are unconfirmed — verify by changing the airflow settings on the BM and re-capturing.
+#### Bypass & Temperature Settings
+
+| TSP Index | Brink name | Value | Description |
+|-----------|------------|-------|-------------|
+| 6 | U4 | 20 | Min. atmospheric temperature for bypass (value × 2 = °C, so 20 → **10 °C**) |
+| 7 | U5 | 44 | Min. indoor temperature for bypass (value × 2 = °C, so 44 → **22 °C**) |
 
 #### Configuration Parameters
 
-| TSP Index | Value | Notes |
-|-----------|-------|-------|
-| 7 | 44 | Unknown config |
-| 17 | 1 | Config flag |
-| 18 | 1 | Config flag |
-| 19 | 2 | Config flag (possibly default ventilation level) |
-| 20 | 0 | Config flag |
-| 23, 24 | 1, 0 | Config flag |
-| 48, 49 | 193, 0 | Device config flags (0xC1) |
-| 52, 53 | 100-130, 0 | Possibly duplicate airflow config |
-| 54 | 1 | Config flag |
-| 66 | 196-255 | 0xFF likely means disabled/not configured |
-| 67, 68 | 0, 0 | Unused |
+| TSP Index | Brink name | Value | Description |
+|-----------|------------|-------|-------------|
+| 11 | I1 | 100 | Fixed imbalance (value shifted by 100, so 100 = **0% imbalance**) |
+| 17 | I7 | 1 | Pressure control / fan mode setting |
+| 18 | I8 | 1 | Bypass configuration |
+| 19 | I9 | 2 | Hysteresis / preheater setting |
+| 20 | I10 | 0 | Additional config |
+| 23 | I13 | 1 | Filter message setting |
+| 24 | I14 | 0 | PCB configuration |
+| 48, 49 | P18 | 193, 0 | Device/PCB config flags |
 
-#### Live Values (change between or within captures)
+#### Live / Status Values (read-only, change during operation)
 
-| TSP Index | Value range | Notes |
-|-----------|-------------|-------|
-| 55 | 114-118 | Varies between captures — possibly a sensor reading |
-| 56 | 121 | Possibly a sensor reading |
-| 60 | 0-130 | Changes **within** captures — likely bypass damper position or runtime counter |
-| 61 | 0 | |
-| 62 | 100-113 | Varies between captures |
-| 63 | 0 | |
-| 64 | 20-215 | Varies significantly — live sensor reading |
-| 65 | 0-1 | |
+| TSP Index | Brink name | Value range | Description |
+|-----------|------------|-------------|-------------|
+| 52, 53 | CurrentVol | 100-130, 0 | Current outlet volume **[m³/h]** |
+| 54 | BypassStatus | 1 | Bypass valve position (0=shut, 1=auto, 2=open?) |
+| 55 | TempAtmo | 114-118 | Atmospheric temperature (value − 100 = °C, so 114 → **14 °C**) |
+| 56 | TempIndoors | 121 | Indoor temperature (value − 100 = °C, so 121 → **21 °C**) |
+| 60, 61 | — | 0-130, 0 | Changes within captures — possibly supply/exhaust flow |
+| 62, 63 | CurrentOutputVol | 100-113, 0 | Current output volume **[m³/h]** |
+| 64, 65 | CPID | 20-215, 0-1 | Input duct pressure **[Pa]** |
+| 66, 67 | CPOD | 196-255, 0 | Output duct pressure **[Pa]** |
+| 68 | FrostStatus | 0 | Frost protection status (0 = no frost) |
 
 ### Data IDs to Probe
 
