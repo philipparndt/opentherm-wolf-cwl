@@ -6,6 +6,7 @@
 #include "logging.h"
 #include "ap_mode.h"
 #include "scheduler.h"
+#include "display.h"
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
@@ -118,10 +119,30 @@ static void setupApiEndpoints() {
         doc["system"]["version"] = FIRMWARE_VERSION;
         doc["system"]["mqttConnected"] = mqtt.connected();
         doc["system"]["wifiRssi"] = WiFi.RSSI();
+        doc["timedOff"]["active"] = timedOffActive;
+        doc["timedOff"]["remainingMinutes"] = getTimedOffRemainingMinutes();
+
+        // Airflow rates from TSP registers (m³/h per level)
+        uint16_t reducedFlow = (cwlData.tspValid[0] && cwlData.tspValid[1])
+            ? (cwlData.tspValues[0] | (cwlData.tspValues[1] << 8)) : 100;
+        uint16_t normalFlow = (cwlData.tspValid[2] && cwlData.tspValid[3])
+            ? (cwlData.tspValues[2] | (cwlData.tspValues[3] << 8)) : 130;
+        uint16_t partyFlow = (cwlData.tspValid[4] && cwlData.tspValid[5])
+            ? (cwlData.tspValues[4] | (cwlData.tspValues[5] << 8)) : 195;
+        doc["airflow"]["reduced"] = reducedFlow;
+        doc["airflow"]["normal"] = normalFlow;
+        doc["airflow"]["party"] = partyFlow;
 
         String output;
         serializeJson(doc, output);
         request->send(200, "application/json", output);
+    });
+
+    // Cancel timed off
+    server.on("/api/off_timer/cancel", HTTP_POST, [](AsyncWebServerRequest* request) {
+        if (!isAuthenticated(request)) { request->send(401); return; }
+        cancelTimedOff();
+        request->send(200, "application/json", "{\"success\":true}");
     });
 
     // Set ventilation level
@@ -140,6 +161,37 @@ static void setupApiEndpoints() {
         } else {
             request->send(400, "application/json", "{\"error\":\"Invalid level (0-3)\"}");
         }
+    });
+
+    // Virtual encoder (for testing without physical encoder)
+    server.on("/api/encoder", HTTP_POST, [](AsyncWebServerRequest* request) {},
+              nullptr,
+              [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+        if (!isAuthenticated(request)) { request->send(401); return; }
+        JsonDocument doc;
+        deserializeJson(doc, data, len);
+        String action = doc["action"] | "";
+
+        // Wake display first — if it was in standby, consume this input
+        if (displayWake()) {
+            request->send(200, "application/json", "{\"success\":true}");
+            return;
+        }
+
+        if (action == "left") {
+            if (editMode) adjustEditValue(-1);
+            else prevPage();
+        } else if (action == "right") {
+            if (editMode) adjustEditValue(1);
+            else nextPage();
+        } else if (action == "press") {
+            if (editMode) exitEditMode(true);
+            else enterEditMode();
+        } else {
+            request->send(400, "application/json", "{\"error\":\"Invalid action (left/right/press)\"}");
+            return;
+        }
+        request->send(200, "application/json", "{\"success\":true}");
     });
 
     // Get ventilation schedules

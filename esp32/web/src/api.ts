@@ -3,6 +3,8 @@ export interface Status {
   temperature: { supplyInlet: number; exhaustInlet: number }
   status: { fault: boolean; filter: boolean; bypass: boolean; connected: boolean }
   system: { uptime: number; freeHeap: number; version: string; mqttConnected: boolean; wifiRssi: number }
+  timedOff: { active: boolean; remainingMinutes: number }
+  airflow: { reduced: number; normal: number; party: number }
 }
 
 export interface Config {
@@ -102,6 +104,20 @@ export async function saveBypassSchedule(schedule: BypassScheduleData): Promise<
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(schedule)
+  })
+  return res.ok
+}
+
+export async function cancelTimedOff(): Promise<boolean> {
+  const res = await request('/api/off_timer/cancel', { method: 'POST' })
+  return res.ok
+}
+
+export async function sendEncoderAction(action: 'left' | 'right' | 'press'): Promise<boolean> {
+  const res = await request('/api/encoder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action })
   })
   return res.ok
 }

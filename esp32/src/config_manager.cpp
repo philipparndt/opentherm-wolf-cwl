@@ -121,9 +121,16 @@ void loadConfig() {
             appConfig.mqttAuthEnabled = true;
         #endif
 
-        // If we have WiFi credentials from config.h, mark as configured
+        // Mark as configured if credentials are available
+        #if defined(USE_ETHERNET)
+        appConfig.configured = true;  // Ethernet boards don't need WiFi credentials
+        #else
         if (hasWifiCredentials()) {
             appConfig.configured = true;
+        }
+        #endif
+
+        if (appConfig.configured) {
             log("Config: Migrated from config.h, saving to NVS...");
             prefs.end();
             saveConfig();
@@ -298,10 +305,14 @@ bool updateConfigFromJson(const String& json) {
     if (doc["pins"]["encDt"].is<int>()) appConfig.encDtPin = doc["pins"]["encDt"];
     if (doc["pins"]["encSw"].is<int>()) appConfig.encSwPin = doc["pins"]["encSw"];
 
-    // Mark as configured if we have WiFi
+    // Mark as configured
+    #if defined(USE_ETHERNET)
+    appConfig.configured = true;  // Ethernet boards are always configured (no WiFi setup needed)
+    #else
     if (hasWifiCredentials()) {
         appConfig.configured = true;
     }
+    #endif
 
     saveConfig();
     return true;

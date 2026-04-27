@@ -61,6 +61,8 @@ void encoderLoop() {
         lastPosition = pos;
 
         if (delta != 0) {
+            if (displayWake()) return;  // Wake from standby, discard input
+
             if (editMode) {
                 adjustEditValue(delta > 0 ? 1 : -1);
             } else {
@@ -79,12 +81,13 @@ void encoderLoop() {
 
     if (millis() - lastDebounceTime > DEBOUNCE_MS) {
         if (buttonState == LOW && !buttonHandled) {
-            // Button pressed
             buttonPressStart = millis();
             buttonHandled = true;
 
+            if (displayWake()) return;  // Wake from standby, discard input
+
             if (editMode) {
-                exitEditMode(true);  // Confirm
+                exitEditMode(true);
             } else {
                 enterEditMode();
             }

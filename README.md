@@ -249,3 +249,22 @@ go build -o decode .
 ```
 
 Requires Go 1.26+.
+
+## Schedules
+
+Weekday schedule:
+```
+0:00 - 8:00 reduced
+8:00 - 13:00 normal
+13:00 - 15:00 reduced
+15:00 - 18:00 normal
+18:00 - 0:00 reduced
+```
+
+Weekend schedule:
+```
+0:00 - 10:00 reduced
+10:00 - 13:00 normal
+13:00 - 15:00 reduced
+15:00 - 18:30 normal
+```

@@ -10,7 +10,11 @@ static DNSServer dnsServer;
 static const byte DNS_PORT = 53;
 
 bool shouldStartApMode() {
-  return !appConfig.configured && !hasWifiCredentials();
+  #if defined(USE_ETHERNET)
+    return false;  // Ethernet boards don't need AP mode
+  #else
+    return !appConfig.configured && !hasWifiCredentials();
+  #endif
 }
 
 void setupApMode() {

@@ -7,6 +7,9 @@
 #include "watchdog.h"
 #include "scheduler.h"
 #include <WiFi.h>
+#if defined(USE_ETHERNET)
+  #include <ETH.h>
+#endif
 #include <WiFiClient.h>
 #include <ArduinoJson.h>
 
@@ -17,6 +20,14 @@
 
 static WiFiClient netClient;
 PubSubClient mqtt(netClient);
+
+static String getLocalIP() {
+#if defined(USE_ETHERNET)
+    return ETH.localIP().toString();
+#else
+    return WiFi.localIP().toString();
+#endif
+}
 
 static unsigned long lastMqttReconnect = 0;
 static unsigned long lastPublish = 0;
@@ -74,15 +85,19 @@ void mqttReconnect() {
     if (strlen(appConfig.mqttServer) == 0) return;
     if (millis() - lastMqttReconnect < MQTT_RETRY_INTERVAL) return;
 
-    lastMqttReconnect = millis();
-    log("MQTT: Connecting to " + String(appConfig.mqttServer) + ":" + String(appConfig.mqttPort));
+    // Re-apply server config in case it changed via web UI
+    mqtt.setServer(appConfig.mqttServer, appConfig.mqttPort);
 
-    // Test TCP connectivity first
-    if (!netClient.connect(appConfig.mqttServer, appConfig.mqttPort)) {
-        log("MQTT: TCP connection failed");
-        return;
-    }
-    netClient.stop();
+    lastMqttReconnect = millis();
+
+    // Log network state for debugging
+    #if defined(USE_ETHERNET)
+    log("MQTT: Connecting to " + String(appConfig.mqttServer) + ":" + String(appConfig.mqttPort) +
+        " (ETH IP=" + ETH.localIP().toString() + " GW=" + ETH.gatewayIP().toString() +
+        " DNS=" + ETH.dnsIP().toString() + ")");
+    #else
+    log("MQTT: Connecting to " + String(appConfig.mqttServer) + ":" + String(appConfig.mqttPort));
+    #endif
 
     String clientId = "wolf-cwl-" + String(random(0xffff), HEX);
 
@@ -105,10 +120,12 @@ void mqttReconnect() {
         String setLevel = String(appConfig.mqttTopic) + "/set/level";
         String setBypass = String(appConfig.mqttTopic) + "/set/bypass";
         String setFilter = String(appConfig.mqttTopic) + "/set/filter_reset";
+        String setOffTimer = String(appConfig.mqttTopic) + "/set/off_timer";
 
         mqtt.subscribe(setLevel.c_str());
         mqtt.subscribe(setBypass.c_str());
         mqtt.subscribe(setFilter.c_str());
+        mqtt.subscribe(setOffTimer.c_str());
         log("MQTT: Subscribed to command topics");
 
         publishBridgeInfo();
@@ -135,7 +152,7 @@ void publishBridgeInfo() {
 
     mqtt.publish((baseTopic + "/state").c_str(), "online", true);
     mqtt.publish((baseTopic + "/version").c_str(), FIRMWARE_VERSION, true);
-    mqtt.publish((baseTopic + "/ip").c_str(), WiFi.localIP().toString().c_str(), true);
+    mqtt.publish((baseTopic + "/ip").c_str(), getLocalIP().c_str(), true);
 
     log("MQTT: Published bridge info (version=" + String(FIRMWARE_VERSION) + ")");
 }
@@ -207,6 +224,10 @@ void publishSensorData() {
     mqtt.publish((base + "/bypass/mode").c_str(), requestedBypassOpen ? "summer" : "winter", true);
     mqtt.publish((base + "/bypass/schedule_active").c_str(), bypassScheduleActive ? "1" : "0", true);
     mqtt.publish((base + "/bypass/override").c_str(), bypassOverride ? "1" : "0", true);
+
+    // Timed off state
+    mqtt.publish((base + "/off_timer/active").c_str(), timedOffActive ? "1" : "0", true);
+    mqtt.publish((base + "/off_timer/remaining").c_str(), String(getTimedOffRemainingMinutes()).c_str(), true);
 }
 
 void publishHealthData() {
@@ -236,6 +257,7 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (topicStr == base + "/set/level") {
         int level = message.toInt();
         if (level >= 0 && level <= 3) {
+            if (level > 0 && timedOffActive) cancelTimedOff();
             requestedVentLevel = level;
             appConfig.ventilationLevel = level;
             saveConfig();
@@ -244,6 +266,18 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
                 " (" + getVentilationLevelName(level) + ")");
         } else {
             log("MQTT: Invalid ventilation level: " + message);
+        }
+        return;
+    }
+
+    // Set timed off
+    if (topicStr == base + "/set/off_timer") {
+        int hours = message.toInt();
+        if (hours >= 1 && hours <= 99) {
+            activateTimedOff(hours);
+            log("MQTT: Timed off for " + String(hours) + "h");
+        } else {
+            log("MQTT: Invalid off_timer value: " + message + " (1-99)");
         }
         return;
     }

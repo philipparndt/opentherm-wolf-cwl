@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-#define MAX_SCHEDULES 8
+#define MAX_SCHEDULES 16
 
 // Schedule entry
 struct ScheduleEntry {
@@ -36,6 +36,15 @@ extern bool bypassOverride;       // Bypass manual override
 // Scheduler functions
 void setupScheduler();
 void schedulerLoop();
+
+// Timed off mode
+extern bool timedOffActive;
+extern time_t timedOffEndEpoch;   // UTC epoch when timed off expires (0 = inactive)
+extern uint8_t timedOffHours;
+
+void activateTimedOff(uint8_t hours);
+void cancelTimedOff();
+unsigned long getTimedOffRemainingMinutes();
 
 // Ventilation schedule manual override
 void setVentilationManualOverride();

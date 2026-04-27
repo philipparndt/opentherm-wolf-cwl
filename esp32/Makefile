@@ -25,7 +25,7 @@ DATA_DIR := data
 BUILD_DIR := .pio/build/$(ENV)
 
 .PHONY: all build build-web build-firmware build-fs clean deploy deploy-firmware deploy-fs \
-        dev monitor help install-deps setup-venv
+        dev monitor help install-deps setup-venv build-sim upload-sim monitor-sim debug
 
 # Default target
 all: build
@@ -178,3 +178,28 @@ check-host:
 	@ping -c 1 -W 2 $(HOST) > /dev/null 2>&1 && \
 		echo "$(GREEN)OK$(NC)" || \
 		(echo "$(RED)Failed$(NC)" && exit 1)
+
+# ==========================================
+# Simulation (fake OpenTherm data, no hardware needed)
+# ==========================================
+
+build-sim:
+	@echo "$(CYAN)Building firmware (simulation mode)...$(NC)"
+	@$(PIO) run -e esp32-sim
+	@echo "$(GREEN)Simulation firmware built$(NC)"
+
+upload-sim: build-sim
+	@echo "$(CYAN)Uploading simulation firmware via USB...$(NC)"
+	@$(PIO) run -t upload -e esp32-sim
+
+monitor-sim:
+	@$(PIO) device monitor -e esp32-sim
+
+debug: build-web
+	@echo "$(CYAN)Building and uploading simulation firmware + filesystem (esp32-poe-sim)...$(NC)"
+	@$(PIO) run -e esp32-poe-sim
+	@$(PIO) run -t buildfs -e esp32-poe-sim
+	@$(PIO) run -t upload -e esp32-poe-sim
+	@$(PIO) run -t uploadfs -e esp32-poe-sim
+	@echo "$(GREEN)Debug device ready! Starting serial monitor...$(NC)"
+	@$(PIO) device monitor -e esp32-poe-sim

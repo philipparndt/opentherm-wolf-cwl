@@ -4,10 +4,12 @@
 
 // Display page indices
 #define PAGE_HOME        0
-#define PAGE_TEMPERATURE 1
-#define PAGE_STATUS      2
-#define PAGE_SYSTEM      3
-#define PAGE_COUNT       4
+#define PAGE_BYPASS      1
+#define PAGE_TEMP_IN     2
+#define PAGE_TEMP_OUT    3
+#define PAGE_STATUS      4
+#define PAGE_SYSTEM      5
+#define PAGE_COUNT       6
 
 // Display state
 extern int currentPage;
@@ -24,3 +26,6 @@ void prevPage();
 void enterEditMode();
 void exitEditMode(bool apply);
 void adjustEditValue(int delta);
+
+// Standby — returns true if display was woken (input should be discarded)
+bool displayWake();

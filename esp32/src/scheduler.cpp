@@ -19,6 +19,12 @@ bool scheduleOverride = false;
 bool bypassScheduleActive = false;
 bool bypassOverride = false;
 
+// Timed off state
+bool timedOffActive = false;
+time_t timedOffEndEpoch = 0;
+uint8_t timedOffHours = 0;
+static bool timedOffRestoredFromNvs = false;  // Deferred NTP check pending
+
 static int lastActiveScheduleIndex = -1;
 static bool lastBypassSeason = false;
 static unsigned long lastEvalTime = 0;
@@ -123,6 +129,35 @@ void setupScheduler() {
     memset(&bypassSchedule, 0, sizeof(bypassSchedule));
     loadSchedules();
     loadBypassSchedule();
+
+    // Restore persisted override state (written only on manual user actions)
+    Preferences prefs;
+    prefs.begin(PREFS_NAMESPACE, true);
+
+    // Timed off
+    uint32_t storedEnd = prefs.getUInt("toff_end", 0);
+    if (storedEnd > 0) {
+        timedOffEndEpoch = (time_t)storedEnd;
+        timedOffActive = true;
+        timedOffRestoredFromNvs = true;  // Will verify against NTP in schedulerLoop
+        requestedVentLevel = VENT_LEVEL_OFF;
+        scheduleOverride = true;
+        log("Scheduler: Restored timed off from NVS (end=" + String(storedEnd) + ")");
+    }
+
+    // Manual overrides (only if not already in timed off)
+    if (!timedOffActive) {
+        scheduleOverride = prefs.getBool("sched_ovr", false);
+        if (scheduleOverride) {
+            log("Scheduler: Restored ventilation manual override from NVS");
+        }
+    }
+    bypassOverride = prefs.getBool("bp_ovr", false);
+    if (bypassOverride) {
+        log("Scheduler: Restored bypass manual override from NVS");
+    }
+
+    prefs.end();
 }
 
 // =============================================================================
@@ -203,46 +238,86 @@ static bool evaluateBypassSchedule(struct tm* timeinfo) {
 // =============================================================================
 // Main scheduler loop
 // =============================================================================
+static void persistOverrideState() {
+    Preferences prefs;
+    prefs.begin(PREFS_NAMESPACE, false);
+    prefs.putUInt("toff_end", timedOffActive ? (uint32_t)timedOffEndEpoch : 0);
+    prefs.putBool("sched_ovr", scheduleOverride && !timedOffActive);
+    prefs.putBool("bp_ovr", bypassOverride);
+    prefs.end();
+}
+
 void schedulerLoop() {
     unsigned long now = millis();
+
+    // --- Timed off: NTP-deferred validation after reboot ---
+    time_t now_time = time(nullptr);
+    bool ntpSynced = now_time > 1700000000;
+
+    if (timedOffActive && timedOffRestoredFromNvs && ntpSynced) {
+        timedOffRestoredFromNvs = false;
+        if (timedOffEndEpoch <= now_time) {
+            // Timer already expired during downtime
+            log("Scheduler: Timed off expired during downtime, resuming Normal");
+            timedOffActive = false;
+            timedOffHours = 0;
+            timedOffEndEpoch = 0;
+            requestedVentLevel = VENT_LEVEL_NORMAL;
+            scheduleOverride = false;
+            persistOverrideState();
+        } else {
+            timedOffHours = (uint8_t)((timedOffEndEpoch - now_time) / 3600 + 1);
+            log("Scheduler: Timed off restored, " + String(timedOffHours) + "h remaining");
+        }
+    }
+
+    // --- Timed off expiry check (epoch-based) ---
+    if (timedOffActive && !timedOffRestoredFromNvs && ntpSynced && now_time >= timedOffEndEpoch) {
+        log("Scheduler: Timed off expired, resuming Normal");
+        timedOffActive = false;
+        timedOffHours = 0;
+        timedOffEndEpoch = 0;
+        requestedVentLevel = VENT_LEVEL_NORMAL;
+        scheduleOverride = false;
+        persistOverrideState();
+    }
+
     if (now - lastEvalTime < EVAL_INTERVAL) return;
     lastEvalTime = now;
 
-    // Check NTP sync
-    time_t now_time = time(nullptr);
-    if (now_time < 1700000000) return;  // NTP not synced
+    if (!ntpSynced) return;
 
     struct tm timeinfo;
     localtime_r(&now_time, &timeinfo);
 
-    // --- Ventilation schedule ---
-    int matchIndex = evaluateVentilationSchedule(&timeinfo);
+    // --- Ventilation schedule (skip if timed off is active) ---
+    if (!timedOffActive) {
+        int matchIndex = evaluateVentilationSchedule(&timeinfo);
 
-    if (matchIndex != lastActiveScheduleIndex) {
-        // Transition detected — clear override
-        if (scheduleOverride) {
-            scheduleOverride = false;
-            log("Scheduler: Override cleared (schedule transition)");
-        }
-        lastActiveScheduleIndex = matchIndex;
-    }
-
-    if (!scheduleOverride) {
-        if (matchIndex >= 0) {
-            scheduleActive = true;
-            uint8_t level = schedules[matchIndex].ventLevel;
-            if (level != requestedVentLevel) {
-                requestedVentLevel = level;
-                log("Scheduler: Level set to " + String(level) +
-                    " (" + String(getVentilationLevelName(level)) + ")");
+        if (matchIndex != lastActiveScheduleIndex) {
+            if (scheduleOverride) {
+                scheduleOverride = false;
+                log("Scheduler: Override cleared (schedule transition)");
             }
-        } else {
-            if (scheduleActive) {
-                // No schedule matches — revert to default
-                scheduleActive = false;
-                requestedVentLevel = appConfig.ventilationLevel;
-                log("Scheduler: No schedule active, using default level " +
-                    String(appConfig.ventilationLevel));
+            lastActiveScheduleIndex = matchIndex;
+        }
+
+        if (!scheduleOverride) {
+            if (matchIndex >= 0) {
+                scheduleActive = true;
+                uint8_t level = schedules[matchIndex].ventLevel;
+                if (level != requestedVentLevel) {
+                    requestedVentLevel = level;
+                    log("Scheduler: Level set to " + String(level) +
+                        " (" + String(getVentilationLevelName(level)) + ")");
+                }
+            } else {
+                if (scheduleActive) {
+                    scheduleActive = false;
+                    requestedVentLevel = appConfig.ventilationLevel;
+                    log("Scheduler: No schedule active, using default level " +
+                        String(appConfig.ventilationLevel));
+                }
             }
         }
     }
@@ -277,15 +352,55 @@ void schedulerLoop() {
 void setVentilationManualOverride() {
     if (scheduleActive) {
         scheduleOverride = true;
-        log("Scheduler: Ventilation manual override set");
+        persistOverrideState();
+        log("Scheduler: Ventilation manual override set (persisted)");
     }
 }
 
 void setBypassManualOverride() {
     if (bypassScheduleActive) {
         bypassOverride = true;
-        log("Scheduler: Bypass manual override set");
+        persistOverrideState();
+        log("Scheduler: Bypass manual override set (persisted)");
     }
+}
+
+// =============================================================================
+// Timed off mode
+// =============================================================================
+void activateTimedOff(uint8_t hours) {
+    if (hours == 0 || hours > 99) return;
+    time_t now_time = time(nullptr);
+    if (now_time < 1700000000) return;  // Need NTP for epoch
+
+    timedOffActive = true;
+    timedOffHours = hours;
+    timedOffEndEpoch = now_time + (time_t)hours * 3600;
+    timedOffRestoredFromNvs = false;
+    requestedVentLevel = VENT_LEVEL_OFF;
+    scheduleOverride = true;
+    persistOverrideState();
+    log("Scheduler: Timed off activated for " + String(hours) + "h (persisted)");
+}
+
+void cancelTimedOff() {
+    if (!timedOffActive) return;
+    timedOffActive = false;
+    timedOffHours = 0;
+    timedOffEndEpoch = 0;
+    timedOffRestoredFromNvs = false;
+    requestedVentLevel = VENT_LEVEL_NORMAL;
+    scheduleOverride = false;
+    persistOverrideState();
+    log("Scheduler: Timed off cancelled, resuming Normal (persisted)");
+}
+
+unsigned long getTimedOffRemainingMinutes() {
+    if (!timedOffActive) return 0;
+    time_t now_time = time(nullptr);
+    if (now_time < 1700000000) return 0;  // NTP not synced
+    if (now_time >= timedOffEndEpoch) return 0;
+    return (unsigned long)(timedOffEndEpoch - now_time) / 60;
 }
 
 // =============================================================================
@@ -374,13 +489,27 @@ bool updateBypassScheduleFromJson(const String& json) {
 // =============================================================================
 // Active schedule description
 // =============================================================================
+static const char* daysLabel(uint8_t mask) {
+    if (mask == 0x7F) return "Every day";
+    if (mask == 0x1F) return "Weekdays";
+    if (mask == 0x60) return "Weekend";
+    return nullptr;  // Use individual days
+}
+
 String getActiveScheduleDescription() {
     if (!scheduleActive || lastActiveScheduleIndex < 0) return "";
 
     ScheduleEntry& s = schedules[lastActiveScheduleIndex];
-    char buf[48];
-    snprintf(buf, sizeof(buf), "%02d:%02d-%02d:%02d %s",
-             s.startHour, s.startMinute, s.endHour, s.endMinute,
-             getVentilationLevelName(s.ventLevel));
+    const char* days = daysLabel(s.activeDays);
+    char buf[64];
+    if (days) {
+        snprintf(buf, sizeof(buf), "%02d:%02d-%02d:%02d %s %s",
+                 s.startHour, s.startMinute, s.endHour, s.endMinute,
+                 getVentilationLevelName(s.ventLevel), days);
+    } else {
+        snprintf(buf, sizeof(buf), "%02d:%02d-%02d:%02d %s",
+                 s.startHour, s.startMinute, s.endHour, s.endMinute,
+                 getVentilationLevelName(s.ventLevel));
+    }
     return String(buf);
 }

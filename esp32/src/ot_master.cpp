@@ -2,10 +2,6 @@
 #include "config_manager.h"
 #include "wolf_cwl.h"
 #include "logging.h"
-#include <OpenTherm.h>
-
-// OpenTherm library instance (pins set in setup)
-static OpenTherm* ot = nullptr;
 
 bool otConnected = false;
 
@@ -13,25 +9,153 @@ bool otConnected = false;
 uint8_t requestedVentLevel = 2;   // Normal
 bool requestedBypassOpen = false;
 bool requestedFilterReset = false;
+
+// =============================================================================
+// SIMULATION MODE — fake OpenTherm data for testing without hardware
+// =============================================================================
+#ifdef SIMULATE_OT
+
+static unsigned long lastSimTime = 0;
+static bool simInitialized = false;
+
+void setupOpenTherm() {
+    log("OpenTherm: *** SIMULATION MODE ***");
+    requestedVentLevel = appConfig.ventilationLevel;
+    requestedBypassOpen = appConfig.bypassOpen;
+
+    // Mark all additional IDs as supported
+    cwlData.supportsId81 = true;
+    cwlData.supportsId83 = true;
+    cwlData.supportsId84 = true;
+    cwlData.supportsId85 = true;
+
+    // Populate static TSP values (realistic Wolf CWL defaults)
+    uint8_t tspDefaults[][2] = {
+        {0, 100}, {1, 0},    // U1: Reduced airflow 100 m³/h
+        {2, 130}, {3, 0},    // U2: Normal airflow 130 m³/h
+        {4, 195}, {5, 0},    // U3: Party airflow 195 m³/h
+        {6, 20},             // U4: Min outdoor temp for bypass (10°C)
+        {7, 44},             // U5: Min indoor temp for bypass (22°C)
+        {11, 100},           // I1: Imbalance 0%
+        {17, 1}, {18, 1}, {19, 2},
+        {23, 1}, {24, 0},
+        {54, 1},             // Bypass status: auto
+        {68, 0},             // Frost: none
+    };
+    for (auto& tsp : tspDefaults) {
+        cwlData.tspValues[tsp[0]] = tsp[1];
+        cwlData.tspValid[tsp[0]] = true;
+    }
+
+    cwlData.slaveFlags = 0x07;
+    cwlData.slaveMemberId = 0;
+    cwlData.slaveType = 0;
+    cwlData.slaveVersion = 0;
+    cwlData.connected = true;
+    cwlData.lastResponse = millis();
+
+    simInitialized = true;
+    log("OpenTherm: Simulation initialized with fake CWL data");
+}
+
+void probeAdditionalIds() {
+    // Already done in setup
+}
+
+void openThermLoop() {
+    unsigned long now = millis();
+    if (now - lastSimTime < 1000) return;
+    lastSimTime = now;
+
+    if (!simInitialized) return;
+
+    cwlData.lastResponse = now;
+
+    // Oscillating temperatures
+    float t = now / 1000.0f;
+    cwlData.supplyInletTemp = 18.0f + 5.0f * sin(t / 60.0f);
+    cwlData.exhaustInletTemp = 21.0f + 2.0f * sin(t / 45.0f);
+    cwlData.supplyOutletTemp = 20.0f + 3.0f * sin(t / 50.0f);
+    cwlData.exhaustOutletTemp = 16.0f + 4.0f * sin(t / 55.0f);
+
+    // Ventilation responds to level
+    cwlData.ventilationLevel = requestedVentLevel;
+    static const uint8_t ventMap[] = {0, 51, 67, 100};
+    cwlData.relativeVentilation = ventMap[requestedVentLevel > 3 ? 2 : requestedVentLevel];
+
+    // Status flags
+    cwlData.fault = false;
+    cwlData.ventilationActive = requestedBypassOpen;
+    cwlData.filterDirty = false;
+    cwlData.coolingActive = false;
+    cwlData.dhwActive = false;
+    cwlData.diagEvent = false;
+    cwlData.faultFlags = 0;
+    cwlData.oemFaultCode = 0;
+
+    // Fan speeds
+    uint16_t baseSpeed = cwlData.relativeVentilation * 25;
+    cwlData.exhaustFanSpeed = baseSpeed + (uint16_t)(50 * sin(t / 30.0f));
+    cwlData.supplyFanSpeed = baseSpeed + (uint16_t)(40 * sin(t / 35.0f));
+
+    // Dynamic TSP values
+    uint16_t airflow = (requestedVentLevel == 0) ? 0 :
+                       (requestedVentLevel == 1) ? 100 :
+                       (requestedVentLevel == 2) ? 130 : 195;
+    cwlData.tspValues[52] = airflow & 0xFF;
+    cwlData.tspValues[53] = (airflow >> 8) & 0xFF;
+    cwlData.tspValid[52] = true;
+    cwlData.tspValid[53] = true;
+
+    cwlData.tspValues[55] = 100 + (uint8_t)(14 + 3 * sin(t / 120.0f));  // ~14°C outdoor
+    cwlData.tspValid[55] = true;
+    cwlData.tspValues[56] = 121;  // 21°C indoor
+    cwlData.tspValid[56] = true;
+
+    cwlData.tspValues[64] = 150 + (uint8_t)(30 * sin(t / 40.0f));  // Input pressure ~150 Pa
+    cwlData.tspValues[65] = 0;
+    cwlData.tspValid[64] = true;
+    cwlData.tspValid[65] = true;
+    cwlData.tspValues[66] = 200 + (uint8_t)(20 * sin(t / 50.0f));  // Output pressure ~200 Pa
+    cwlData.tspValues[67] = 0;
+    cwlData.tspValid[66] = true;
+    cwlData.tspValid[67] = true;
+
+    updateDerivedValues();
+
+    // Handle filter reset
+    if (requestedFilterReset) {
+        requestedFilterReset = false;
+        log("OpenTherm [SIM]: Filter reset acknowledged");
+    }
+}
+
+// =============================================================================
+// REAL MODE — actual OpenTherm communication via DIYLess shield
+// =============================================================================
+#else
+
+#include <OpenTherm.h>
+
+static OpenTherm* ot = nullptr;
 static bool filterResetActive = false;
 
-// Polling cycle state machine
 enum PollState {
-    POLL_MASTER_CONFIG,      // ID 2: Write master config
-    POLL_STATUS,             // ID 70: Read status with control flags
-    POLL_SETPOINT,           // ID 71: Write ventilation level
-    POLL_CONFIG,             // ID 74: Read config/member-id
-    POLL_VENTILATION,        // ID 77: Read relative ventilation %
-    POLL_SUPPLY_TEMP,        // ID 80: Read supply inlet temperature
-    POLL_EXHAUST_TEMP,       // ID 82: Read exhaust inlet temperature
-    POLL_MASTER_VERSION,     // ID 126: Write master product version
-    POLL_SLAVE_VERSION,      // ID 127: Read slave product version
-    POLL_TSP,                // ID 89: Read TSP index/value
-    POLL_FAULT,              // ID 72: Read fault flags
-    POLL_SUPPLY_OUTLET,      // ID 81
-    POLL_EXHAUST_OUTLET,     // ID 83
-    POLL_EXHAUST_FAN,        // ID 84
-    POLL_SUPPLY_FAN,         // ID 85
+    POLL_MASTER_CONFIG,
+    POLL_STATUS,
+    POLL_SETPOINT,
+    POLL_CONFIG,
+    POLL_VENTILATION,
+    POLL_SUPPLY_TEMP,
+    POLL_EXHAUST_TEMP,
+    POLL_MASTER_VERSION,
+    POLL_SLAVE_VERSION,
+    POLL_TSP,
+    POLL_FAULT,
+    POLL_SUPPLY_OUTLET,
+    POLL_EXHAUST_OUTLET,
+    POLL_EXHAUST_FAN,
+    POLL_SUPPLY_FAN,
     POLL_CYCLE_DONE
 };
 
@@ -40,11 +164,8 @@ static unsigned long lastPollTime = 0;
 static uint8_t tspIndex = 0;
 static bool probeComplete = false;
 
-#define POLL_INTERVAL 1000  // 1 second between requests
+#define POLL_INTERVAL 1000
 
-// =============================================================================
-// OpenTherm interrupt handler
-// =============================================================================
 static void IRAM_ATTR handleInterrupt() {
     ot->handleInterrupt();
 }
@@ -54,25 +175,18 @@ void setupOpenTherm() {
     ot->begin(handleInterrupt);
     log("OpenTherm: Initialized (IN=" + String(appConfig.otInPin) +
         ", OUT=" + String(appConfig.otOutPin) + ")");
-
-    // Initialize control state from config
     requestedVentLevel = appConfig.ventilationLevel;
     requestedBypassOpen = appConfig.bypassOpen;
 }
 
-// =============================================================================
-// Send a request and process the response
-// =============================================================================
 static bool sendRequest(unsigned long request, unsigned long& response) {
     response = ot->sendRequest(request);
     OpenThermResponseStatus status = ot->getLastResponseStatus();
-
     if (status == OpenThermResponseStatus::SUCCESS) {
         cwlData.connected = true;
         cwlData.lastResponse = millis();
         return true;
     }
-
     if (status == OpenThermResponseStatus::TIMEOUT) {
         if (cwlData.connected && millis() - cwlData.lastResponse > 30000) {
             cwlData.connected = false;
@@ -82,9 +196,6 @@ static bool sendRequest(unsigned long request, unsigned long& response) {
     return false;
 }
 
-// =============================================================================
-// Process individual data IDs
-// =============================================================================
 static void processStatus(unsigned long response) {
     uint8_t hiResp = (response >> 8) & 0xFF;
     cwlData.fault = hiResp & 0x01;
@@ -135,17 +246,11 @@ static void processFanSpeed(uint8_t dataId, unsigned long response) {
     else if (dataId == 85) cwlData.supplyFanSpeed = speed;
 }
 
-// =============================================================================
-// Build request frames
-// The OpenTherm library's buildRequest takes OpenThermMessageID enum values,
-// but V/H data IDs (70+) are not in the enum. We build frames manually.
-// =============================================================================
 static unsigned long buildFrame(OpenThermMessageType type, uint8_t dataId, uint16_t data) {
     unsigned long frame = 0;
     frame |= ((unsigned long)type) << 28;
     frame |= ((unsigned long)dataId) << 16;
     frame |= data;
-    // Set parity
     if (OpenTherm::parity(frame)) {
         frame |= 0x80000000UL;
     }
@@ -153,9 +258,9 @@ static unsigned long buildFrame(OpenThermMessageType type, uint8_t dataId, uint1
 }
 
 static unsigned long buildStatusRequest() {
-    uint8_t flags = 0x01;  // bit 0: ch/ventilation enable
-    if (requestedBypassOpen) flags |= 0x02;  // bit 1: bypass open
-    if (filterResetActive) flags |= 0x10;    // bit 4: filter reset
+    uint8_t flags = 0x01;
+    if (requestedBypassOpen) flags |= 0x02;
+    if (filterResetActive) flags |= 0x10;
     return buildFrame(OpenThermMessageType::READ_DATA, 70, (uint16_t)(flags << 8));
 }
 
@@ -166,9 +271,6 @@ static unsigned long buildSetpointRequest() {
     return buildFrame(OpenThermMessageType::WRITE_DATA, 71, (uint16_t)level);
 }
 
-// =============================================================================
-// Probe additional V/H data IDs
-// =============================================================================
 void probeAdditionalIds() {
     log("OpenTherm: Probing additional data IDs...");
 
@@ -214,15 +316,11 @@ void probeAdditionalIds() {
     log("OpenTherm: Probe complete");
 }
 
-// =============================================================================
-// Main polling loop
-// =============================================================================
 void openThermLoop() {
     unsigned long now = millis();
     if (now - lastPollTime < POLL_INTERVAL) return;
     lastPollTime = now;
 
-    // Run probe once on first successful communication
     if (!probeComplete && cwlData.connected) {
         probeAdditionalIds();
         return;
@@ -236,63 +334,42 @@ void openThermLoop() {
             sendRequest(request, response);
             pollState = POLL_STATUS;
             break;
-
         case POLL_STATUS:
             request = buildStatusRequest();
-            if (sendRequest(request, response)) {
-                processStatus(response);
-            }
-            if (filterResetActive) {
-                filterResetActive = false;
-                log("OpenTherm: Filter reset cleared");
-            }
+            if (sendRequest(request, response)) processStatus(response);
+            if (filterResetActive) { filterResetActive = false; log("OpenTherm: Filter reset cleared"); }
             pollState = POLL_SETPOINT;
             break;
-
         case POLL_SETPOINT:
             request = buildSetpointRequest();
             sendRequest(request, response);
             pollState = POLL_CONFIG;
             break;
-
         case POLL_CONFIG:
             request = buildFrame(OpenThermMessageType::READ_DATA, 74, 0);
-            if (sendRequest(request, response)) {
-                processConfig(response);
-            }
+            if (sendRequest(request, response)) processConfig(response);
             pollState = POLL_VENTILATION;
             break;
-
         case POLL_VENTILATION:
             request = buildFrame(OpenThermMessageType::READ_DATA, 77, 0);
-            if (sendRequest(request, response)) {
-                processVentilation(response);
-            }
+            if (sendRequest(request, response)) processVentilation(response);
             pollState = POLL_SUPPLY_TEMP;
             break;
-
         case POLL_SUPPLY_TEMP:
             request = buildFrame(OpenThermMessageType::READ_DATA, 80, 0);
-            if (sendRequest(request, response)) {
-                processTemperature(80, response);
-            }
+            if (sendRequest(request, response)) processTemperature(80, response);
             pollState = POLL_EXHAUST_TEMP;
             break;
-
         case POLL_EXHAUST_TEMP:
             request = buildFrame(OpenThermMessageType::READ_DATA, 82, 0);
-            if (sendRequest(request, response)) {
-                processTemperature(82, response);
-            }
+            if (sendRequest(request, response)) processTemperature(82, response);
             pollState = POLL_MASTER_VERSION;
             break;
-
         case POLL_MASTER_VERSION:
             request = buildFrame(OpenThermMessageType::WRITE_DATA, 126, 0x1202);
             sendRequest(request, response);
             pollState = POLL_SLAVE_VERSION;
             break;
-
         case POLL_SLAVE_VERSION:
             request = buildFrame(OpenThermMessageType::READ_DATA, 127, 0);
             if (sendRequest(request, response)) {
@@ -301,72 +378,54 @@ void openThermLoop() {
             }
             pollState = POLL_TSP;
             break;
-
         case POLL_TSP:
             request = buildFrame(OpenThermMessageType::READ_DATA, 89, (uint16_t)(tspIndex << 8));
-            if (sendRequest(request, response)) {
-                processTsp(response);
-            }
+            if (sendRequest(request, response)) processTsp(response);
             tspIndex++;
             if (tspIndex >= TSP_MAX_INDEX) tspIndex = 0;
             pollState = POLL_FAULT;
             break;
-
         case POLL_FAULT:
             request = buildFrame(OpenThermMessageType::READ_DATA, 72, 0);
-            if (sendRequest(request, response)) {
-                processFault(response);
-            }
+            if (sendRequest(request, response)) processFault(response);
             pollState = cwlData.supportsId81 ? POLL_SUPPLY_OUTLET :
                         (cwlData.supportsId83 ? POLL_EXHAUST_OUTLET :
                         (cwlData.supportsId84 ? POLL_EXHAUST_FAN :
                         (cwlData.supportsId85 ? POLL_SUPPLY_FAN : POLL_CYCLE_DONE)));
             break;
-
         case POLL_SUPPLY_OUTLET:
             request = buildFrame(OpenThermMessageType::READ_DATA, 81, 0);
-            if (sendRequest(request, response)) {
-                processTemperature(81, response);
-            }
+            if (sendRequest(request, response)) processTemperature(81, response);
             pollState = cwlData.supportsId83 ? POLL_EXHAUST_OUTLET :
                         (cwlData.supportsId84 ? POLL_EXHAUST_FAN :
                         (cwlData.supportsId85 ? POLL_SUPPLY_FAN : POLL_CYCLE_DONE));
             break;
-
         case POLL_EXHAUST_OUTLET:
             request = buildFrame(OpenThermMessageType::READ_DATA, 83, 0);
-            if (sendRequest(request, response)) {
-                processTemperature(83, response);
-            }
+            if (sendRequest(request, response)) processTemperature(83, response);
             pollState = cwlData.supportsId84 ? POLL_EXHAUST_FAN :
                         (cwlData.supportsId85 ? POLL_SUPPLY_FAN : POLL_CYCLE_DONE);
             break;
-
         case POLL_EXHAUST_FAN:
             request = buildFrame(OpenThermMessageType::READ_DATA, 84, 0);
-            if (sendRequest(request, response)) {
-                processFanSpeed(84, response);
-            }
+            if (sendRequest(request, response)) processFanSpeed(84, response);
             pollState = cwlData.supportsId85 ? POLL_SUPPLY_FAN : POLL_CYCLE_DONE;
             break;
-
         case POLL_SUPPLY_FAN:
             request = buildFrame(OpenThermMessageType::READ_DATA, 85, 0);
-            if (sendRequest(request, response)) {
-                processFanSpeed(85, response);
-            }
+            if (sendRequest(request, response)) processFanSpeed(85, response);
             pollState = POLL_CYCLE_DONE;
             break;
-
         case POLL_CYCLE_DONE:
             pollState = POLL_MASTER_CONFIG;
             break;
     }
 
-    // Handle filter reset request
     if (requestedFilterReset) {
         requestedFilterReset = false;
         filterResetActive = true;
         log("OpenTherm: Filter reset requested");
     }
 }
+
+#endif // SIMULATE_OT
