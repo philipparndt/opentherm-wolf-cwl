@@ -6,6 +6,7 @@
 #include "ot_master.h"
 #include "watchdog.h"
 #include "scheduler.h"
+#include "display.h"
 #include <WiFi.h>
 #if defined(USE_ETHERNET)
   #include <ETH.h>
@@ -262,6 +263,7 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
             appConfig.ventilationLevel = level;
             saveConfig();
             setVentilationManualOverride();
+            displayWake();
             log("MQTT: Ventilation level set to " + String(level) +
                 " (" + getVentilationLevelName(level) + ")");
         } else {
@@ -289,6 +291,7 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
         appConfig.bypassOpen = open;
         saveConfig();
         setBypassManualOverride();
+        displayWake();
         log("MQTT: Bypass " + String(open ? "open (summer)" : "closed (winter)"));
         return;
     }

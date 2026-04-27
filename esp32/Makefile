@@ -2,7 +2,7 @@
 # ======================================================
 
 # Configuration
-ENV ?= esp32
+ENV ?= esp32-poe
 HOST ?= wolf-cwl.local
 USER ?= admin
 PASS ?= admin

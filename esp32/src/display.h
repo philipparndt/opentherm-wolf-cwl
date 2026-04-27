@@ -29,3 +29,7 @@ void adjustEditValue(int delta);
 
 // Standby — returns true if display was woken (input should be discarded)
 bool displayWake();
+
+// Network status overlay — show on display for 10 seconds
+void displayShowIP(const char* ip);
+void displayShowDisconnected();

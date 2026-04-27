@@ -1,5 +1,6 @@
 #include "network.h"
 #include "config_manager.h"
+#include "display.h"
 #include "logging.h"
 
 // WiFi.h must be included before ETH.h (ETH.h depends on WiFi types)
@@ -32,10 +33,12 @@ void onEthEvent(WiFiEvent_t event) {
           " GW: " + ETH.gatewayIP().toString() +
           " DNS: " + ETH.dnsIP().toString());
       networkConnected = true;
+      displayShowIP(ETH.localIP().toString().c_str());
       break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
       log("ETH: Link down");
       networkConnected = false;
+      displayShowDisconnected();
       break;
     case ARDUINO_EVENT_ETH_STOP:
       log("ETH: Stopped");
@@ -126,11 +129,13 @@ void networkLoop() {
       log("WiFi: Reconnected, IP: " + WiFi.localIP().toString());
       WiFi.setSleep(false);
       networkConnected = true;
+      displayShowIP(WiFi.localIP().toString().c_str());
     }
   } else {
     if (networkConnected) {
       log("WiFi: Disconnected");
       networkConnected = false;
+      displayShowDisconnected();
     }
 
     if (now - lastWifiCheck > WIFI_CHECK_INTERVAL) {

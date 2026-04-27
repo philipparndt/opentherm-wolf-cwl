@@ -34,6 +34,13 @@ static bool displayStandby = false;
 static unsigned long lastActivityTime = 0;
 #define STANDBY_TIMEOUT 300000  // 5 minutes
 
+// Overlay state (used for connect/disconnect notifications)
+static char overlayHeader[16] = {0};
+static char overlayMessage[16] = {0};
+static unsigned long overlayStart = 0;
+static bool overlayActive = false;
+#define OVERLAY_TIMEOUT 10000  // 10 seconds
+
 // Detect display chip by probing I2C
 // SSD1306 and SH1106 both respond at 0x3C, but we can differentiate
 // by trying SSD1306 first — if the display shows artifacts, it's SH1106
@@ -279,17 +286,49 @@ void updateDisplay() {
         displayStandby = true;
         return;
     }
+    // Wake from standby if IP overlay was requested (from event task context)
+    if (displayStandby && overlayActive) {
+        displayStandby = false;
+        u8g2.setPowerSave(0);
+    }
     if (displayStandby) return;  // Skip rendering while in standby
+
+    // Clear expired IP overlay
+    if (overlayActive && millis() - overlayStart > OVERLAY_TIMEOUT) {
+        overlayActive = false;
+    }
 
     u8g2.clearBuffer();
 
-    switch (currentPage) {
-        case PAGE_HOME:     drawHomePage(); break;
-        case PAGE_BYPASS:   drawBypassPage(); break;
-        case PAGE_TEMP_IN:  drawTempInPage(); break;
-        case PAGE_TEMP_OUT: drawTempOutPage(); break;
-        case PAGE_STATUS:   drawStatusPage(); break;
-        case PAGE_SYSTEM:   drawSystemPage(); break;
+    if (overlayActive && !editMode) {
+        // Network status overlay screen (timed, 10s)
+        u8g2.setFont(u8g2_font_helvR08_tr);
+        int hw = u8g2.getStrWidth(overlayHeader);
+        u8g2.drawStr((128 - hw) / 2, 18, overlayHeader);
+
+        u8g2.setFont(u8g2_font_helvB14_tr);
+        int mw = u8g2.getStrWidth(overlayMessage);
+        u8g2.drawStr((128 - mw) / 2, 42, overlayMessage);
+    } else if (!cwlData.connected && !editMode) {
+        // Permanent CWL disconnected screen
+        u8g2.setFont(u8g2_font_helvR08_tr);
+        const char* hdr = "CWL";
+        int hw = u8g2.getStrWidth(hdr);
+        u8g2.drawStr((128 - hw) / 2, 18, hdr);
+
+        u8g2.setFont(u8g2_font_helvB14_tr);
+        const char* msg = "Disconnected";
+        int mw = u8g2.getStrWidth(msg);
+        u8g2.drawStr((128 - mw) / 2, 42, msg);
+    } else {
+        switch (currentPage) {
+            case PAGE_HOME:     drawHomePage(); break;
+            case PAGE_BYPASS:   drawBypassPage(); break;
+            case PAGE_TEMP_IN:  drawTempInPage(); break;
+            case PAGE_TEMP_OUT: drawTempOutPage(); break;
+            case PAGE_STATUS:   drawStatusPage(); break;
+            case PAGE_SYSTEM:   drawSystemPage(); break;
+        }
     }
 
     // Page indicator dots (centered, y=61 so radius 2 stays within 64px)
@@ -403,10 +442,31 @@ void adjustEditValue(int delta) {
 
 bool displayWake() {
     lastActivityTime = millis();
+    overlayActive = false;  // User interaction dismisses IP overlay
     if (displayStandby) {
         displayStandby = false;
         u8g2.setPowerSave(0);
         return true;  // Input consumed — caller should discard
     }
     return false;  // Was already awake — pass input through
+}
+
+// Safe to call from any context (event task, ISR) — only sets flags,
+// no I2C. The actual wake happens in updateDisplay() on the main loop.
+static void showOverlay(const char* header, const char* message) {
+    strncpy(overlayHeader, header, sizeof(overlayHeader) - 1);
+    overlayHeader[sizeof(overlayHeader) - 1] = '\0';
+    strncpy(overlayMessage, message, sizeof(overlayMessage) - 1);
+    overlayMessage[sizeof(overlayMessage) - 1] = '\0';
+    overlayStart = millis();
+    overlayActive = true;
+    lastActivityTime = millis();
+}
+
+void displayShowIP(const char* ip) {
+    showOverlay("Connected", ip);
+}
+
+void displayShowDisconnected() {
+    showOverlay("Disconnected", "No network");
 }

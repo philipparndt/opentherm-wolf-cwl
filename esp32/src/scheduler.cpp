@@ -3,6 +3,7 @@
 #include "config_manager.h"
 #include "wolf_cwl.h"
 #include "logging.h"
+#include "display.h"
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <time.h>
@@ -265,6 +266,7 @@ void schedulerLoop() {
             requestedVentLevel = VENT_LEVEL_NORMAL;
             scheduleOverride = false;
             persistOverrideState();
+            displayWake();
         } else {
             timedOffHours = (uint8_t)((timedOffEndEpoch - now_time) / 3600 + 1);
             log("Scheduler: Timed off restored, " + String(timedOffHours) + "h remaining");
@@ -280,6 +282,7 @@ void schedulerLoop() {
         requestedVentLevel = VENT_LEVEL_NORMAL;
         scheduleOverride = false;
         persistOverrideState();
+        displayWake();
     }
 
     if (now - lastEvalTime < EVAL_INTERVAL) return;
@@ -308,6 +311,7 @@ void schedulerLoop() {
                 uint8_t level = schedules[matchIndex].ventLevel;
                 if (level != requestedVentLevel) {
                     requestedVentLevel = level;
+                    displayWake();
                     log("Scheduler: Level set to " + String(level) +
                         " (" + String(getVentilationLevelName(level)) + ")");
                 }
@@ -315,6 +319,7 @@ void schedulerLoop() {
                 if (scheduleActive) {
                     scheduleActive = false;
                     requestedVentLevel = appConfig.ventilationLevel;
+                    displayWake();
                     log("Scheduler: No schedule active, using default level " +
                         String(appConfig.ventilationLevel));
                 }
@@ -339,6 +344,7 @@ void schedulerLoop() {
         bypassScheduleActive = true;
         if (isSummer != requestedBypassOpen) {
             requestedBypassOpen = isSummer;
+            displayWake();
             log("Scheduler: Bypass " + String(isSummer ? "open (summer)" : "closed (winter)"));
         }
     } else if (!bypassSchedule.enabled) {
@@ -380,6 +386,7 @@ void activateTimedOff(uint8_t hours) {
     requestedVentLevel = VENT_LEVEL_OFF;
     scheduleOverride = true;
     persistOverrideState();
+    displayWake();
     log("Scheduler: Timed off activated for " + String(hours) + "h (persisted)");
 }
 
@@ -392,6 +399,7 @@ void cancelTimedOff() {
     requestedVentLevel = VENT_LEVEL_NORMAL;
     scheduleOverride = false;
     persistOverrideState();
+    displayWake();
     log("Scheduler: Timed off cancelled, resuming Normal (persisted)");
 }
 
