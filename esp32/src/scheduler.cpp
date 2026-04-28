@@ -356,10 +356,16 @@ void schedulerLoop() {
 // Manual override
 // =============================================================================
 void setVentilationManualOverride() {
-    if (scheduleActive) {
-        scheduleOverride = true;
+    scheduleOverride = true;
+    persistOverrideState();
+    log("Scheduler: Ventilation manual override set (persisted)");
+}
+
+void clearVentilationOverride() {
+    if (scheduleOverride) {
+        scheduleOverride = false;
         persistOverrideState();
-        log("Scheduler: Ventilation manual override set (persisted)");
+        log("Scheduler: Ventilation override cleared, resuming schedule");
     }
 }
 

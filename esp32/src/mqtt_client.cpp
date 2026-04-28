@@ -261,7 +261,6 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
             if (level > 0 && timedOffActive) cancelTimedOff();
             requestedVentLevel = level;
             appConfig.ventilationLevel = level;
-            saveConfig();
             setVentilationManualOverride();
             displayWake();
             log("MQTT: Ventilation level set to " + String(level) +
@@ -289,7 +288,6 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
         bool open = (message == "1" || message == "true" || message == "on");
         requestedBypassOpen = open;
         appConfig.bypassOpen = open;
-        saveConfig();
         setBypassManualOverride();
         displayWake();
         log("MQTT: Bypass " + String(open ? "open (summer)" : "closed (winter)"));

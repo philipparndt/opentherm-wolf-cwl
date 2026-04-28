@@ -3,6 +3,7 @@ import { login, getStatus, getConfig, saveConfig, setVentilationLevel, uploadFir
          getSchedules, saveSchedules, getBypassSchedule, saveBypassSchedule, sendEncoderAction,
          cancelTimedOff,
          type Status, type Config, type ScheduleEntry, type BypassScheduleData } from './api'
+import { StatusTab } from './StatusTab'
 
 const LEVELS = ['Off', 'Reduced', 'Normal', 'Party'] as const
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
@@ -45,48 +46,6 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
         </form>
       </div>
     </div>
-  )
-}
-
-function StatusTab({ status, onLevelChange, onCancelOff }: { status: Status | null; onLevelChange: (level: number) => void; onCancelOff: () => void }) {
-  if (!status) return <div>Loading...</div>
-
-  const fmtRemaining = (min: number) => {
-    const h = Math.floor(min / 60), m = min % 60
-    return h > 0 ? `${h}h ${m}m` : `${m}m`
-  }
-
-  return (
-    <>
-      {status.timedOff?.active && (
-        <div class="msg error" style="display:flex;justify-content:space-between;align-items:center">
-          <span>Ventilation Off — resumes in {fmtRemaining(status.timedOff.remainingMinutes)}</span>
-          <button class="danger" style="padding:6px 12px;font-size:0.8em;margin:0" onClick={onCancelOff}>Cancel</button>
-        </div>
-      )}
-      <div class="card">
-        <h3>Ventilation</h3>
-        <div class="level-buttons">
-          {LEVELS.map((name, i) => (
-            <div class={`level-btn ${status.ventilation.level === i ? 'active' : ''}`}
-                 onClick={() => onLevelChange(i)}>{name}</div>
-          ))}
-        </div>
-        <div class="stat"><span class="label">Relative</span><span class="value">{status.ventilation.relative}%</span></div>
-      </div>
-      <div class="card">
-        <h3>Temperatures</h3>
-        <div class="stat"><span class="label">Supply inlet</span><span class="value">{status.temperature.supplyInlet.toFixed(1)} °C</span></div>
-        <div class="stat"><span class="label">Exhaust inlet</span><span class="value">{status.temperature.exhaustInlet.toFixed(1)} °C</span></div>
-      </div>
-      <div class="card">
-        <h3>Status</h3>
-        <div class="stat"><span class="label">Connected</span><span class={`value ${status.status.connected ? 'ok' : 'fault'}`}>{status.status.connected ? 'Yes' : 'No'}</span></div>
-        <div class="stat"><span class="label">Fault</span><span class={`value ${status.status.fault ? 'fault' : 'ok'}`}>{status.status.fault ? 'YES' : 'No'}</span></div>
-        <div class="stat"><span class="label">Filter</span><span class={`value ${status.status.filter ? 'fault' : 'ok'}`}>{status.status.filter ? 'Replace' : 'OK'}</span></div>
-        <div class="stat"><span class="label">Bypass</span><span class="value">{status.status.bypass ? 'Open' : 'Closed'}</span></div>
-      </div>
-    </>
   )
 }
 
@@ -153,6 +112,16 @@ function WeekTimeline({ entries, airflow, onEntriesChange }: {
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [dragging, setDragging] = useState<{ entryIdx: number; edge: 'start' | 'end' } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; seg: TlSeg; dayIdx: number } | null>(null)
+
+  // Current time line
+  const [nowMin, setNowMin] = useState(() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes() })
+  useEffect(() => {
+    const id = setInterval(() => { const d = new Date(); setNowMin(d.getHours() * 60 + d.getMinutes()) }, 60000)
+    return () => clearInterval(id)
+  }, [])
+  const nowPct = nowMin / 1440 * 100
+  // JS getDay: 0=Sun, convert to Mon=0
+  const todayIdx = (new Date().getDay() + 6) % 7
 
   const showTip = (e: MouseEvent, seg: TlSeg) => {
     if (dragging) return
@@ -300,6 +269,7 @@ function WeekTimeline({ entries, airflow, onEntriesChange }: {
           <div class="tl-row" key={dayIdx}>
             <div class="tl-label">{day}</div>
             <div class="tl-bar">
+              <div class={`tl-now ${dayIdx === todayIdx ? 'tl-now-today' : ''}`} style={`left:${nowPct}%`} />
               {segs.map((seg, i) => {
                 const left = seg.start / 1440 * 100
                 const width = (seg.end - seg.start) / 1440 * 100
@@ -639,6 +609,7 @@ export function App() {
   const [authenticated, setAuthenticated] = useState(false)
   const [tab, setTab] = useState(0)
   const [status, setStatus] = useState<Status | null>(null)
+  const [pendingAction, setPendingAction] = useState(false)
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -651,9 +622,9 @@ export function App() {
   useEffect(() => {
     if (!authenticated) return
     refreshStatus()
-    const interval = setInterval(refreshStatus, 5000)
+    const interval = setInterval(refreshStatus, pendingAction ? 1000 : 5000)
     return () => clearInterval(interval)
-  }, [authenticated, refreshStatus])
+  }, [authenticated, refreshStatus, pendingAction])
 
   useEffect(() => {
     getStatus().then((s) => { setStatus(s); setAuthenticated(true) }).catch(() => {})
@@ -664,13 +635,14 @@ export function App() {
   return (
     <div class="container">
       <h1>Wolf CWL</h1>
+      {status?.system.simulated && <div class="sim-banner">Simulation Mode</div>}
       <div class="tabs">
         <div class={`tab ${tab === 0 ? 'active' : ''}`} onClick={() => setTab(0)}>Status</div>
         <div class={`tab ${tab === 1 ? 'active' : ''}`} onClick={() => setTab(1)}>Schedules</div>
         <div class={`tab ${tab === 2 ? 'active' : ''}`} onClick={() => setTab(2)}>Settings</div>
         <div class={`tab ${tab === 3 ? 'active' : ''}`} onClick={() => setTab(3)}>System</div>
       </div>
-      {tab === 0 && <StatusTab status={status} onLevelChange={async (level) => { await setVentilationLevel(level); refreshStatus() }} onCancelOff={async () => { await cancelTimedOff(); refreshStatus() }} />}
+      {tab === 0 && <StatusTab status={status} onLevelChange={async (level) => { setPendingAction(true); await setVentilationLevel(level) }} onCancelOff={async () => { await cancelTimedOff(); refreshStatus() }} onConfirmed={() => setPendingAction(false)} />}
       {tab === 1 && <SchedulesTab airflow={status?.airflow} />}
       {tab === 2 && <SettingsTab />}
       {tab === 3 && <SystemTab status={status} />}

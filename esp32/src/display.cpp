@@ -343,6 +343,11 @@ void updateDisplay() {
         }
     }
 
+    #ifdef SIMULATE_OT
+    u8g2.setFont(u8g2_font_helvR08_tr);
+    u8g2.drawStr(128 - u8g2.getStrWidth("SIM"), 8, "SIM");
+    #endif
+
     u8g2.sendBuffer();
 }
 
@@ -393,7 +398,6 @@ void exitEditMode(bool apply) {
                 if (timedOffActive) cancelTimedOff();
                 requestedVentLevel = editVentLevel;
                 appConfig.ventilationLevel = editVentLevel;
-                saveConfig();
                 setVentilationManualOverride();
                 log("Display: Ventilation set to " + String(editVentLevel) +
                     " (" + getVentilationLevelName(editVentLevel) + ")");
@@ -402,7 +406,7 @@ void exitEditMode(bool apply) {
             bool open = editVentLevel != 0;
             requestedBypassOpen = open;
             appConfig.bypassOpen = open;
-            saveConfig();
+            saveBypassState();
             setBypassManualOverride();
             log("Display: Bypass set to " + String(open ? "summer (open)" : "winter (closed)"));
         }

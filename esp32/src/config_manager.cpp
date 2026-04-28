@@ -189,6 +189,12 @@ void saveConfig() {
     log("Config: Saved to NVS");
 }
 
+void saveBypassState() {
+    prefs.begin(PREFS_NAMESPACE, false);
+    prefs.putBool("bypass_open", appConfig.bypassOpen);
+    prefs.end();
+}
+
 void resetConfig() {
     prefs.begin(PREFS_NAMESPACE, false);
     prefs.clear();

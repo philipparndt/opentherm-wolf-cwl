@@ -3,6 +3,10 @@ import preact from '@preact/preset-vite'
 
 export default defineConfig({
   plugins: [preact()],
+  test: {
+    environment: 'jsdom',
+    globals: true,
+  },
   build: {
     outDir: '../data',
     emptyOutDir: false,

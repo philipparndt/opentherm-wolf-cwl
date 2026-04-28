@@ -210,6 +210,20 @@ Base topic is configurable (default: `wolf-cwl`).
 | 2 | Normal | 67% | ~130 m³/h |
 | 3 | Party | 100% | ~195 m³/h |
 
+## NVS Persistence
+
+Mode changes (ventilation level, bypass) are applied instantly in memory. To minimize flash wear and keep the UI responsive, only specific state is persisted to NVS:
+
+| State | Persisted | Reason |
+|-------|-----------|--------|
+| **Timed off** (ventilation off with duration) | Yes | Must survive reboots — `activateTimedOff()` writes to NVS |
+| **Bypass** (summer/winter) via display encoder | Yes | Seasonal setting — `saveBypassState()` writes single key |
+| **Bypass** via MQTT | No | Avoid flash wear from frequent automation commands |
+| **Ventilation level** (any source) | No | Transient — scheduler sets the correct level on boot |
+| **Settings** (WiFi, MQTT, pins, web auth) | Yes | Full `saveConfig()` on settings changes only |
+
+On reboot, ventilation level reverts to the stored default until the scheduler takes over (within seconds). Bypass reverts to the last value set on the device.
+
 ## Watchdog & Reliability
 
 The firmware includes multiple self-healing mechanisms:

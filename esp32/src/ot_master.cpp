@@ -267,8 +267,11 @@ static unsigned long buildStatusRequest() {
 static unsigned long buildSetpointRequest() {
     uint8_t level = requestedVentLevel;
     if (level > 3) level = 2;
-    cwlData.ventilationLevel = level;
     return buildFrame(OpenThermMessageType::WRITE_DATA, 71, (uint16_t)level);
+}
+
+static void processSetpoint(unsigned long response) {
+    cwlData.ventilationLevel = response & 0xFF;
 }
 
 void probeAdditionalIds() {
@@ -342,7 +345,7 @@ void openThermLoop() {
             break;
         case POLL_SETPOINT:
             request = buildSetpointRequest();
-            sendRequest(request, response);
+            if (sendRequest(request, response)) processSetpoint(response);
             pollState = POLL_CONFIG;
             break;
         case POLL_CONFIG:

@@ -48,6 +48,7 @@ unsigned long getTimedOffRemainingMinutes();
 
 // Ventilation schedule manual override
 void setVentilationManualOverride();
+void clearVentilationOverride();
 
 // Bypass manual override
 void setBypassManualOverride();

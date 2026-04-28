@@ -107,7 +107,10 @@ static void setupApiEndpoints() {
         JsonDocument doc;
         doc["ventilation"]["level"] = cwlData.ventilationLevel;
         doc["ventilation"]["levelName"] = getVentilationLevelName(cwlData.ventilationLevel);
+        doc["ventilation"]["requestedLevel"] = requestedVentLevel;
         doc["ventilation"]["relative"] = cwlData.relativeVentilation;
+        doc["ventilation"]["scheduleActive"] = scheduleActive;
+        doc["ventilation"]["override"] = scheduleOverride;
         doc["temperature"]["supplyInlet"] = cwlData.supplyInletTemp;
         doc["temperature"]["exhaustInlet"] = cwlData.exhaustInletTemp;
         doc["status"]["fault"] = cwlData.fault;
@@ -119,6 +122,11 @@ static void setupApiEndpoints() {
         doc["system"]["version"] = FIRMWARE_VERSION;
         doc["system"]["mqttConnected"] = mqtt.connected();
         doc["system"]["wifiRssi"] = WiFi.RSSI();
+        #ifdef SIMULATE_OT
+        doc["system"]["simulated"] = true;
+        #else
+        doc["system"]["simulated"] = false;
+        #endif
         doc["timedOff"]["active"] = timedOffActive;
         doc["timedOff"]["remainingMinutes"] = getTimedOffRemainingMinutes();
 
@@ -156,11 +164,18 @@ static void setupApiEndpoints() {
         if (level >= 0 && level <= 3) {
             requestedVentLevel = level;
             appConfig.ventilationLevel = level;
-            saveConfig();
+            setVentilationManualOverride();
             request->send(200, "application/json", "{\"success\":true}");
         } else {
             request->send(400, "application/json", "{\"error\":\"Invalid level (0-3)\"}");
         }
+    });
+
+    // Clear ventilation manual override — resume schedule
+    server.on("/api/ventilation/resume", HTTP_POST, [](AsyncWebServerRequest* request) {
+        if (!isAuthenticated(request)) { request->send(401); return; }
+        clearVentilationOverride();
+        request->send(200, "application/json", "{\"success\":true}");
     });
 
     // Virtual encoder (for testing without physical encoder)

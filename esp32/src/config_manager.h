@@ -61,6 +61,7 @@ extern AppConfig appConfig;
 void initConfigManager();
 void loadConfig();
 void saveConfig();
+void saveBypassState();
 void resetConfig();
 
 // Helper to check if WiFi credentials are set

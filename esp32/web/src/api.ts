@@ -1,8 +1,8 @@
 export interface Status {
-  ventilation: { level: number; levelName: string; relative: number }
+  ventilation: { level: number; levelName: string; relative: number; requestedLevel: number; scheduleActive: boolean; override: boolean }
   temperature: { supplyInlet: number; exhaustInlet: number }
   status: { fault: boolean; filter: boolean; bypass: boolean; connected: boolean }
-  system: { uptime: number; freeHeap: number; version: string; mqttConnected: boolean; wifiRssi: number }
+  system: { uptime: number; freeHeap: number; version: string; mqttConnected: boolean; wifiRssi: number; simulated: boolean }
   timedOff: { active: boolean; remainingMinutes: number }
   airflow: { reduced: number; normal: number; party: number }
 }
@@ -110,6 +110,11 @@ export async function saveBypassSchedule(schedule: BypassScheduleData): Promise<
 
 export async function cancelTimedOff(): Promise<boolean> {
   const res = await request('/api/off_timer/cancel', { method: 'POST' })
+  return res.ok
+}
+
+export async function resumeSchedule(): Promise<boolean> {
+  const res = await request('/api/ventilation/resume', { method: 'POST' })
   return res.ok
 }
 
