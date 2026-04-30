@@ -218,9 +218,11 @@ r2 = R("R2", "680")
 r4 = R("R4", "10k")
 r5 = R("R5", "1k")
 u2 = OPTO("U2", "LTV-817S-B")
-d1 = DIODE("D1", "BZX384-C3V3")
-d2 = DIODE("D2", "1N4148WS")
+d1 = DIODE("D1", "BZX384-C4V7")       # 4.7V zener (matches reference design)
+d2 = DIODE("D2", "1N4148WS")           # Bus protection — polarity independence
 d3 = DIODE("D3", "1N4148WS")
+d4 = DIODE("D4", "1N4148WS")
+d5 = DIODE("D5", "1N4148WS")
 
 rx_anode = Net("RX_ANODE")
 rx_cathode = Net("RX_CATHODE")
@@ -228,9 +230,9 @@ rx_cathode = Net("RX_CATHODE")
 ot_plus += r2["1"]
 r2["2"] += rx_anode
 rx_anode += u2["A"]
-rx_anode += d1["K"]
+rx_anode += d1["K"]                     # Zener cathode — clamps voltage across opto LED
 u2["K"] += rx_cathode
-rx_cathode += d1["A"]
+rx_cathode += d1["A"]                   # Zener anode
 rx_cathode += r5["1"]
 r5["2"] += ot_minus
 
@@ -239,10 +241,19 @@ u2["C"] += ot_rx_sig
 ot_rx_sig += r4["1"]
 r4["2"] += vcc
 
+# Full bridge protection — makes OT bus polarity-independent
+# Forward path:  OT+ → D2(A→K) → +3V3 clamp
+#                GND → D3(A→K) → OT-
+# Reverse path:  OT- → D4(A→K) → +3V3 clamp
+#                GND → D5(A→K) → OT+
 d2["A"] += ot_plus
 d2["K"] += vcc
 d3["A"] += gnd
 d3["K"] += ot_minus
+d4["A"] += ot_minus
+d4["K"] += vcc
+d5["A"] += gnd
+d5["K"] += ot_plus
 
 # =============================================================================
 # SW1: Encoder — Alps EC12E24204A9

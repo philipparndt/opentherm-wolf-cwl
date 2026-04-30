@@ -44,8 +44,8 @@ Additional signals from the ESP32-POE EXT1/EXT2 headers:
 |-----|-----------|----------|--------------|-------------|-----|
 | U1, U2 | LTV-817S-B | 859-LTV-817S-B | Lite-On | Optocoupler, SOP-4 SMD (PC817 compatible) | 2 |
 | Q1 | 2N7002 | 512-2N7002 | onsemi | N-MOSFET, SOT-23, 60V 200mA | 1 |
-| D1 | BZX384-C3V3,115 | 771-BZX384-C3V3115 | Nexperia | 3.3V Zener, SOD-323, 300mW | 1 |
-| D2, D3 | 1N4148WS | 512-1N4148WS | onsemi | Switching diode, SOD-323, 100V | 2 |
+| D1 | BZX384-C4V7,115 | 771-BZX384-C4V7115 | Nexperia | 4.7V Zener, SOD-323, 300mW | 1 |
+| D2-D5 | 1N4148WS | 512-1N4148WS | onsemi | Switching diode, SOD-323, 100V (bus protection, polarity-independent) | 4 |
 | R1 | RC0603FR-07330RL | 603-RC0603FR-07330RL | Yageo | 330Ω, 0603, 1%, thick film | 1 |
 | R2 | RC0603FR-07680RL | 603-RC0603FR-07680RL | Yageo | 680Ω, 0603, 1%, thick film | 1 |
 | R3 | RC0603FR-074K7L | 603-RC0603FR-074K7L | Yageo | 4.7kΩ, 0603, 1%, thick film | 1 |
@@ -73,30 +73,40 @@ Additional signals from the ESP32-POE EXT1/EXT2 headers:
 ## OpenTherm Schematic
 
 ```
-                   Shield                      OT Bus
-                                                ┌── OT+
-  GPIO 4 (TX) ──── R1 330Ω ──┐                 │
-                              LED+ U1 (EL817)   │
-                              LED-              │
-                       U1 collector ─┐          │
-                       U1 emitter ── GND        │
-                                     │          │
-                       Q1 gate ──────┘          │
-                       R3 4.7kΩ gate─GND        │
-                       Q1 drain ────────────────┤
-                       Q1 source ── GND         │
-                                                │
-  GPIO 36 (RX) ──┬── R4 10kΩ ── 3.3V          │
-                  │                             │
-                  U2 collector                  │
-                  U2 emitter ── GND             │
-                  │                             │
-                  U2 LED+ ── R2 680Ω ──────────┤
-                  U2 LED- ── R5 1kΩ ───────────┤
-                  D1 BZX55C3V3 across U2 LED    │
-                                                │
-                  D2 1N4148 ── bus protection   │
-                                                └── OT-
+                   Shield                         OT Bus
+                                                   ┌── OT+
+  OT_TX_SIG ────── R1 330Ω ──┐                    │
+                              LED+ U1 (LTV-817S)   │
+                              LED-                 │
+                       U1 collector ─┐             │
+                       U1 emitter ── GND           │
+                                     │             │
+                       Q1 gate ──────┘             │
+                       R3 4.7kΩ gate─GND           │
+                       Q1 drain ───────────────────┤
+                       Q1 source ── GND            │
+                                                   │
+  OT_RX_SIG ───┬── R4 10kΩ ── 3.3V               │
+               │                                   │
+               U2 collector                        │
+               U2 emitter ── GND                   │
+               │                                   │
+               U2 LED+ ── R2 680Ω ────────────────┤
+               U2 LED- ── R5 1kΩ ─────────────────┤
+               D1 BZX384-C4V7 (zener) across LED   │
+                                                   │
+  Bus protection (polarity-independent):           │
+               D2: OT+ ──(A)──(K)── +3V3          │
+               D3: GND ──(A)──(K)── OT-           │
+               D4: OT- ──(A)──(K)── +3V3          │
+               D5: GND ──(A)──(K)── OT+           │
+                                                   └── OT-
+
+  Solder bridges (GPIO selection):
+    SB3 (default closed): UEXT TXD (GPIO1) ── OT_TX_SIG
+    SB4 (default closed): UEXT RXD (GPIO3) ── OT_RX_SIG
+    SB1 (default open):   J4 GPIO4 ── OT_TX_SIG
+    SB2 (default open):   J4 GPIO36 ── OT_RX_SIG
 ```
 
 ## Encoder Wiring

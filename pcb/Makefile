@@ -11,21 +11,29 @@ PYTHON_3D := $(VENV_3D)/bin/python
 PIP_3D := $(VENV_3D)/bin/pip
 PYTHON3_12 := /opt/homebrew/bin/python3.12
 
+# KiCad
+KICAD_CLI := kicad-cli
+KICAD_PROJECT := cwl/cwl.kicad_pcb
+FREECADCMD := /Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd
+
 # KiCad library paths (macOS KiCad 10)
 export KICAD9_SYMBOL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols
 export KICAD_SYMBOL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols
 export KICAD9_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
 export KICAD_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
 
-.PHONY: generate generate-3d clean setup setup-3d help
+.PHONY: generate generate-3d export-stl-full export-stl-board export-stl-parts clean setup setup-3d help
 
 help:
 	@echo "Wolf CWL Shield PCB"
 	@echo ""
-	@echo "  make setup       - Create venv and install dependencies"
-	@echo "  make generate    - Generate KiCad netlist"
-	@echo "  make generate-3d - Generate 3D STEP models (requires Python 3.12)"
-	@echo "  make clean       - Remove generated files and venvs"
+	@echo "  make setup            - Create venv and install dependencies"
+	@echo "  make generate         - Generate KiCad netlist"
+	@echo "  make generate-3d      - Generate 3D STEP models (requires Python 3.12)"
+	@echo "  make export-stl-full  - Export full PCB assembly as STL"
+	@echo "  make export-stl-board - Export bare PCB only as STL"
+	@echo "  make export-stl-parts - Export components only as STL (no board)"
+	@echo "  make clean            - Remove generated files and venvs"
 
 setup: $(VENV)/bin/activate
 
@@ -55,8 +63,31 @@ generate: setup
 generate-3d: setup-3d
 	$(PYTHON_3D) generate_3d_models.py
 
+export-stl-full:
+	@echo "Exporting full PCB assembly..."
+	$(KICAD_CLI) pcb export step --force --include-tracks --include-pads --include-silkscreen --include-soldermask --output cwl/cwl-assembly.step $(KICAD_PROJECT)
+	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/cwl/cwl-assembly.step','$(CURDIR)/cwl/cwl-assembly.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null
+	@rm -f cwl/cwl-assembly.step
+	@echo "Exported: cwl/cwl-assembly.stl"
+
+export-stl-board:
+	@echo "Exporting bare PCB..."
+	$(KICAD_CLI) pcb export step --force --no-components --include-tracks --include-pads --include-silkscreen --include-soldermask --output cwl/cwl-board.step $(KICAD_PROJECT)
+	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/cwl/cwl-board.step','$(CURDIR)/cwl/cwl-board.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null
+	@rm -f cwl/cwl-board.step
+	@echo "Exported: cwl/cwl-board.stl"
+
+export-stl-parts:
+	@echo "Exporting components only..."
+	$(KICAD_CLI) pcb export step --force --subst-models --no-board-body --output cwl/cwl-parts.step $(KICAD_PROJECT)
+	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/cwl/cwl-parts.step','$(CURDIR)/cwl/cwl-parts.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null
+	@rm -f cwl/cwl-parts.step
+	@echo "Exported: cwl/cwl-parts.stl"
+
 clean:
 	rm -rf $(VENV) $(VENV_3D)
 	rm -f wolf-cwl-shield.net
+	rm -f cwl/cwl-assembly.stl cwl/cwl-board.stl cwl/cwl-parts.stl
+	rm -f cwl/cwl-assembly.step cwl/cwl-board.step cwl/cwl-parts.step
 	rm -f *.xml
 	rm -rf __pycache__

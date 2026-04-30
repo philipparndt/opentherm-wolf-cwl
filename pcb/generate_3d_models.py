@@ -7,6 +7,9 @@ Output: 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step
 
 import cadquery as cq
 
+# Set to True for 3D printing prototype (large cavity instead of pin holes)
+PRINTABLE = False
+
 
 def idc_female_socket_2x05():
     """
@@ -58,19 +61,32 @@ def idc_female_socket_2x05():
     )
     body = body.union(bump)
 
-    # Rectangular pin holes through the body
-    for col in range(cols):
-        for row in range(rows):
-            x = col * pitch
-            y = row * pitch
-            hole = (
-                cq.Workplane("XY")
-                .workplane(offset=-0.1)
-                .center(x, y)
-                .rect(hole_w, hole_d)
-                .extrude(body_h + 0.2)
-            )
-            body = body.cut(hole)
+    if PRINTABLE:
+        # 3D printing: hollow out the inside to fit over ESP32-POE box header
+        cavity_w = (cols - 1) * pitch + 2.0
+        cavity_d = (rows - 1) * pitch + 2.0
+        cavity = (
+            cq.Workplane("XY")
+            .workplane(offset=-0.1)
+            .center(cx, cy)
+            .rect(cavity_w, cavity_d)
+            .extrude(body_h + 0.2)
+        )
+        body = body.cut(cavity)
+    else:
+        # Accurate model: individual rectangular pin holes
+        for col in range(cols):
+            for row in range(rows):
+                x = col * pitch
+                y = row * pitch
+                hole = (
+                    cq.Workplane("XY")
+                    .workplane(offset=-0.1)
+                    .center(x, y)
+                    .rect(hole_w, hole_d)
+                    .extrude(body_h + 0.2)
+                )
+                body = body.cut(hole)
 
     # Pin tails below PCB
     pin_bodies = cq.Workplane("XY")

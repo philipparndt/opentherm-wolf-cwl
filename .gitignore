@@ -61,6 +61,8 @@ pcb/fp-info-cache
 pcb/**/*.erc
 pcb/**/*.drc
 pcb/.venv-3d
+pcb/cwl/*.step
+pcb/cwl/*.stl
 pcb/cwl/cwl-backups
 pcb/cwl/.history
 *.lck
