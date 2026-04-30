@@ -1,0 +1,36 @@
+[package]
+name = "wolf-cwl"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+
+[features]
+default = ["wifi", "ot-uext"]
+wifi = []
+ethernet = []
+simulate-ot = []
+ot-uext = []   # OT on UEXT TXD(GPIO1)/RXD(GPIO3) — default, no extra wires
+ot-ext = []    # OT on GPIO4/GPIO36 via J4 EXT header — fallback, keeps serial debug
+
+[dependencies]
+esp-idf-svc = { version = "0.51", features = ["binstart"] }
+log = "0.4"
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+embedded-graphics = "0.8"
+ssd1306 = "0.9"
+sh1106 = "0.5"
+u8g2-fonts = "0.5"
+
+[package.metadata.esp-idf-sys]
+extra_components = []
+
+[profile.release]
+opt-level = 2        # optimize for speed
+lto = "fat"          # link-time optimization across all crates
+strip = true         # strip debug symbols
+
+[build-dependencies]
+embuild = "0.33"
+cc = "1"

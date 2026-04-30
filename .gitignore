@@ -43,3 +43,23 @@ esp32/.venv
 esp32/.pio
 esp32/data
 esp32/web/node_modules
+esp32-rust/target
+esp32-rust/.embuild
+esp32/.vscode
+
+# PCB
+pcb/.venv
+pcb/__pycache__
+pcb/*.net
+pcb/*.xml
+pcb/*.svg
+pcb/*.kicad_prl
+pcb/*.kicad_pcb-bak
+pcb/*.kicad_sch-bak
+pcb/*-backups/
+pcb/fp-info-cache
+pcb/.venv-3d
+pcb/cwl/cwl-backups
+pcb/cwl/.history
+*.lck
+pcb/.history

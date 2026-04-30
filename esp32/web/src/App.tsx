@@ -4,6 +4,7 @@ import { login, getStatus, getConfig, saveConfig, setVentilationLevel, uploadFir
          cancelTimedOff,
          type Status, type Config, type ScheduleEntry, type BypassScheduleData } from './api'
 import { StatusTab } from './StatusTab'
+import { OledMirror } from './OledMirror'
 
 const LEVELS = ['Off', 'Reduced', 'Normal', 'Party'] as const
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
@@ -646,6 +647,8 @@ export function App() {
       {tab === 1 && <SchedulesTab airflow={status?.airflow} />}
       {tab === 2 && <SettingsTab />}
       {tab === 3 && <SystemTab status={status} />}
+
+      <OledMirror />
 
       <div class="encoder-bar">
         <button class="enc-btn" onClick={() => sendEncoderAction('left')}>&#9664; Left</button>

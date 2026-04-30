@@ -113,6 +113,17 @@ export async function cancelTimedOff(): Promise<boolean> {
   return res.ok
 }
 
+export interface DisplayFrame {
+  width: number
+  height: number
+  data: string // base64-encoded framebuffer
+}
+
+export async function getDisplay(): Promise<DisplayFrame> {
+  const res = await request('/api/display')
+  return res.json()
+}
+
 export async function resumeSchedule(): Promise<boolean> {
   const res = await request('/api/ventilation/resume', { method: 'POST' })
   return res.ok

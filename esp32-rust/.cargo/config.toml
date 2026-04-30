@@ -1,0 +1,14 @@
+[build]
+target = "xtensa-esp32-espidf"
+
+[target.xtensa-esp32-espidf]
+linker = "ldproxy"
+runner = "espflash flash --monitor"
+
+[unstable]
+build-std = ["std", "panic_abort"]
+
+[env]
+MCU = "esp32"
+# Note: ESP_IDF_VERSION and ESP_IDF_TOOLS_INSTALL_DIR can be set here if needed
+# ESP_IDF_VERSION = "v5.3"
