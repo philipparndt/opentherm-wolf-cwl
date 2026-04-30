@@ -58,8 +58,12 @@ pcb/*.kicad_pcb-bak
 pcb/*.kicad_sch-bak
 pcb/*-backups/
 pcb/fp-info-cache
+pcb/**/*.erc
+pcb/**/*.drc
 pcb/.venv-3d
 pcb/cwl/cwl-backups
 pcb/cwl/.history
 *.lck
 pcb/.history
+wolf-cwl-core/target
+*.log
