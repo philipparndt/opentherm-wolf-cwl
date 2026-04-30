@@ -10,8 +10,8 @@ WEB_SRC := ../esp32/web
 WEB_OUT := ../esp32/data
 PARTITIONS := partitions.csv
 SPIFFS_IMG := /tmp/wolf-cwl-spiffs.bin
-SPIFFS_SIZE := 0xB0000
-SPIFFS_OFFSET := 0x350000
+SPIFFS_SIZE := 0xF0000
+SPIFFS_OFFSET := 0x310000
 SPIFFSGEN := .embuild/espressif/esp-idf/v5.2.3/components/spiffs/spiffsgen.py
 ESPTOOL_PY := .embuild/espressif/python_env/idf5.2_py3.14_env/bin/python3
 
@@ -45,14 +45,14 @@ build:
 
 flash: build
 	@echo "$(CYAN)Flashing firmware...$(NC)"
-	espflash flash -p $(PORT) target/xtensa-esp32-espidf/release/wolf-cwl
+	espflash flash -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
 	@echo "$(GREEN)Flash complete$(NC)"
 
 monitor:
 	espflash monitor -p $(PORT)
 
 flash-monitor: build
-	espflash flash --monitor -p $(PORT) target/xtensa-esp32-espidf/release/wolf-cwl
+	espflash flash --monitor -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
 
 dev: flash-monitor
 
@@ -79,7 +79,7 @@ flash-fs: build-fs
 
 flash-all: build build-fs
 	@echo "$(CYAN)Flashing firmware + SPIFFS...$(NC)"
-	espflash flash -p $(PORT) target/xtensa-esp32-espidf/release/wolf-cwl
+	espflash flash -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
 	$(ESPTOOL_PY) -m esptool --chip esp32 -p $(PORT) write_flash $(SPIFFS_OFFSET) $(SPIFFS_IMG)
 	@echo "$(GREEN)All flashed$(NC)"
 	espflash monitor -p $(PORT)

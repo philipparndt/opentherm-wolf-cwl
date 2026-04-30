@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'preact/hooks'
 import { login, getStatus, getConfig, saveConfig, setVentilationLevel, uploadFirmware,
          getSchedules, saveSchedules, getBypassSchedule, saveBypassSchedule, sendEncoderAction,
-         cancelTimedOff,
+         cancelTimedOff, downloadBackup, restoreBackup,
          type Status, type Config, type ScheduleEntry, type BypassScheduleData } from './api'
 import { StatusTab } from './StatusTab'
 import { OledMirror } from './OledMirror'
@@ -561,6 +561,26 @@ function SettingsTab() {
         <input type="password" value={config.web.password} onInput={(e) => update('web', 'password', (e.target as HTMLInputElement).value)} />
       </div>
       <button onClick={handleSave}>Save Settings</button>
+
+      <div class="card" style="margin-top:16px">
+        <h3>Backup & Restore</h3>
+        <p style="font-size:0.85em;color:var(--text-muted);margin-bottom:8px">Export or import all settings and schedules as a JSON file.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onClick={() => downloadBackup()}>Export Backup</button>
+          <label class="level-btn" style="cursor:pointer;padding:8px 16px;margin:0">
+            Import Backup
+            <input type="file" accept=".json" style="display:none" onChange={async (e) => {
+              const f = (e.target as HTMLInputElement).files?.[0]
+              if (f && await restoreBackup(f)) {
+                setMsg({ type: 'success', text: 'Backup restored. Reboot to apply network changes.' })
+                getConfig().then(setConfig)
+              } else {
+                setMsg({ type: 'error', text: 'Failed to restore backup' })
+              }
+            }} />
+          </label>
+        </div>
+      </div>
     </>
   )
 }

@@ -317,6 +317,116 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         Ok(())
     })?;
 
+    // --- GET /api/backup (export all settings + schedules as JSON) ---
+    let s = state.clone();
+    server.fn_handler("/api/backup", Method::Get, move |req| -> HandlerResult {
+        if !is_authenticated(&req) { return send_unauthorized(req); }
+        let st = s.lock().unwrap();
+        let c = &st.config;
+        let body = json!({
+            "config": {
+                "network": {
+                    "wifiSsid": c.wifi_ssid,
+                    "wifiPassword": c.wifi_password,
+                },
+                "mqtt": {
+                    "enabled": c.mqtt_enabled,
+                    "server": c.mqtt_server,
+                    "port": c.mqtt_port,
+                    "topic": c.mqtt_topic,
+                    "authEnabled": c.mqtt_auth_enabled,
+                    "username": c.mqtt_username,
+                    "password": c.mqtt_password,
+                },
+                "web": {
+                    "username": c.web_username,
+                    "password": c.web_password,
+                },
+                "pins": {
+                    "otIn": c.ot_in_pin,
+                    "otOut": c.ot_out_pin,
+                    "sda": c.sda_pin,
+                    "scl": c.scl_pin,
+                    "encClk": c.enc_clk_pin,
+                    "encDt": c.enc_dt_pin,
+                    "encSw": c.enc_sw_pin,
+                },
+                "configured": c.configured,
+            },
+            "schedules": st.schedules,
+            "bypassSchedule": st.bypass_schedule,
+        });
+        let json_str = body.to_string();
+        let mut resp = req.into_response(200, None, &[
+            ("Content-Type", "application/json"),
+            ("Content-Disposition", "attachment; filename=\"wolf-cwl-backup.json\""),
+        ])?;
+        resp.write_all(json_str.as_bytes())?;
+        Ok(())
+    })?;
+
+    // --- POST /api/restore (import all settings + schedules from JSON) ---
+    let s = state.clone();
+    server.fn_handler("/api/restore", Method::Post, move |mut req| -> HandlerResult {
+        if !is_authenticated(&req) { return send_unauthorized(req); }
+        let body = read_body(&mut req);
+        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&body) {
+            let mut st = s.lock().unwrap();
+
+            // Restore config
+            if let Some(cfg) = val.get("config") {
+                if let Some(net) = cfg.get("network") {
+                    if let Some(v) = net["wifiSsid"].as_str() { st.config.wifi_ssid = v.to_string(); }
+                    if let Some(v) = net["wifiPassword"].as_str() { st.config.wifi_password = v.to_string(); }
+                }
+                if let Some(mqtt) = cfg.get("mqtt") {
+                    if let Some(v) = mqtt["enabled"].as_bool() { st.config.mqtt_enabled = v; }
+                    if let Some(v) = mqtt["server"].as_str() { st.config.mqtt_server = v.to_string(); }
+                    if let Some(v) = mqtt["port"].as_u64() { st.config.mqtt_port = v as u16; }
+                    if let Some(v) = mqtt["topic"].as_str() { st.config.mqtt_topic = v.to_string(); }
+                    if let Some(v) = mqtt["authEnabled"].as_bool() { st.config.mqtt_auth_enabled = v; }
+                    if let Some(v) = mqtt["username"].as_str() { st.config.mqtt_username = v.to_string(); }
+                    if let Some(v) = mqtt["password"].as_str() { st.config.mqtt_password = v.to_string(); }
+                }
+                if let Some(web) = cfg.get("web") {
+                    if let Some(v) = web["username"].as_str() { st.config.web_username = v.to_string(); }
+                    if let Some(v) = web["password"].as_str() { st.config.web_password = v.to_string(); }
+                }
+                if let Some(pins) = cfg.get("pins") {
+                    if let Some(v) = pins["otIn"].as_u64() { st.config.ot_in_pin = v as u8; }
+                    if let Some(v) = pins["otOut"].as_u64() { st.config.ot_out_pin = v as u8; }
+                    if let Some(v) = pins["sda"].as_u64() { st.config.sda_pin = v as u8; }
+                    if let Some(v) = pins["scl"].as_u64() { st.config.scl_pin = v as u8; }
+                    if let Some(v) = pins["encClk"].as_u64() { st.config.enc_clk_pin = v as u8; }
+                    if let Some(v) = pins["encDt"].as_u64() { st.config.enc_dt_pin = v as u8; }
+                    if let Some(v) = pins["encSw"].as_u64() { st.config.enc_sw_pin = v as u8; }
+                }
+                st.config.configured = true;
+            }
+
+            // Restore schedules
+            if let Some(sched) = val.get("schedules") {
+                if let Ok(entries) = serde_json::from_value::<Vec<crate::scheduler::ScheduleEntry>>(sched.clone()) {
+                    st.schedules = entries;
+                }
+            }
+
+            // Restore bypass schedule
+            if let Some(bp) = val.get("bypassSchedule") {
+                if let Ok(schedule) = serde_json::from_value::<crate::scheduler::BypassSchedule>(bp.clone()) {
+                    st.bypass_schedule = schedule;
+                }
+            }
+
+            info!("Settings restored from backup");
+            drop(st);
+            return send_ok(req);
+        }
+        let mut resp = req.into_response(400, None, &[("Content-Type", "application/json")])?;
+        resp.write_all(b"{\"error\":\"Invalid JSON\"}")?;
+        Ok(())
+    })?;
+
     // --- GET /api/schedules ---
     let s = state.clone();
     server.fn_handler("/api/schedules", Method::Get, move |req| -> HandlerResult {

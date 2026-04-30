@@ -21,12 +21,8 @@ impl Watchdog {
                 idle_core_mask: 0,
                 trigger_panic: true,
             };
-            // Try init first (may already be initialized by ESP-IDF)
-            let ret = esp_task_wdt_init(&config);
-            if ret != ESP_OK {
-                // Already initialized — reconfigure
-                esp_task_wdt_reconfigure(&config);
-            }
+            // ESP-IDF already initializes TWDT — just reconfigure with our timeout
+            esp_task_wdt_reconfigure(&config);
             // Add current task to WDT
             let handle = xTaskGetCurrentTaskHandle();
             let ret = esp_task_wdt_add(handle);

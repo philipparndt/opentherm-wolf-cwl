@@ -8,7 +8,7 @@ Output: 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step
 import cadquery as cq
 
 # Set to True for 3D printing prototype (large cavity instead of pin holes)
-PRINTABLE = False
+PRINTABLE = True
 
 
 def idc_female_socket_2x05():

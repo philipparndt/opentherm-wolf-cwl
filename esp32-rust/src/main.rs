@@ -36,6 +36,9 @@ fn main() {
     // Status LED
     let mut led = status_led::StatusLed::new(peripherals.pins.gpio2.into());
 
+    // Wait for peripherals to stabilize after power-on (SH1106 needs ~100ms)
+    FreeRtos::delay_ms(200);
+
     // I2C for display
     let i2c_config = I2cConfig::new().baudrate(400.kHz().into());
     let i2c = I2cDriver::new(

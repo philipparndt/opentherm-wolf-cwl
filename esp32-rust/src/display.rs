@@ -1,4 +1,4 @@
-//! OLED display — 128x64 I2C, SH1106, 6 pages with overlays.
+//! OLED display — 128x64 I2C, SSD1306 driver (compatible with SH1106), 6 pages with overlays.
 
 use std::sync::{Arc, Mutex};
 
@@ -7,8 +7,10 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, Line, PrimitiveStyle};
 use esp_idf_svc::hal::i2c::I2cDriver;
 use log::info;
-use sh1106::prelude::*;
-use sh1106::Builder;
+use ssd1306::mode::BufferedGraphicsMode;
+use ssd1306::prelude::*;
+use ssd1306::I2CDisplayInterface;
+use ssd1306::Ssd1306;
 use u8g2_fonts::fonts;
 use u8g2_fonts::FontRenderer;
 use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
@@ -17,9 +19,8 @@ use crate::app_state::AppStateInner;
 use crate::cwl_data::ventilation_level_name;
 use crate::framebuffer::FrameBuffer;
 
-
 type AppState = Arc<Mutex<AppStateInner>>;
-type Disp = GraphicsMode<sh1106::interface::I2cInterface<I2cDriver<'static>>>;
+type Disp = Ssd1306<I2CInterface<I2cDriver<'static>>, DisplaySize128x64, BufferedGraphicsMode<DisplaySize128x64>>;
 
 pub const PAGE_COUNT: usize = 6;
 const STANDBY_TIMEOUT_MS: u32 = 300_000;
@@ -63,20 +64,31 @@ pub struct Display {
 
 impl Display {
     pub fn new(i2c: I2cDriver<'static>, state: AppState) -> Self {
-        let mut display: GraphicsMode<_> = Builder::new().connect_i2c(i2c).into();
-        let ok = display.init().is_ok();
-        if ok {
-            display.flush().ok();
-            info!("Display: Initialized (SH1106)");
-        } else {
-            info!("Display: Init failed");
+        let interface = I2CDisplayInterface::new(i2c);
+        let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+            .into_buffered_graphics_mode();
+
+        let mut ok = false;
+        for attempt in 1..=3 {
+            if display.init().is_ok() {
+                display.clear_buffer();
+                display.flush().ok();
+                ok = true;
+                info!("Display: Initialized (SSD1306/SH1106, attempt {})", attempt);
+                break;
+            }
+            info!("Display: Init attempt {} failed, retrying...", attempt);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        if !ok {
+            info!("Display: Init failed after 3 attempts");
         }
         Self {
             display: if ok { Some(display) } else { None },
             fb: FrameBuffer::new(),
             state, current_page: Page::Home, edit_mode: false, edit_vent_level: 2,
             edit_off_duration: false, edit_off_hours: 1, standby: false,
-            last_activity_ms: 0, overlay_active: false, overlay_header: String::new(),
+            last_activity_ms: now(), overlay_active: false, overlay_header: String::new(),
             overlay_message: String::new(), overlay_start_ms: 0, edit_mode_start_ms: 0,
         }
     }
@@ -92,7 +104,7 @@ impl Display {
             if !self.standby && !self.edit_mode
                 && now_ms.saturating_sub(self.last_activity_ms) > STANDBY_TIMEOUT_MS {
                 // Turn off display by clearing and flushing a blank screen
-                display.clear();
+                display.clear_buffer();
                 display.flush().ok();
                 self.standby = true;
                 self.fb.clear();
@@ -127,7 +139,7 @@ impl Display {
             }
         };
 
-        display.clear();
+        display.clear_buffer();
         {
             let st = self.state.lock().unwrap();
             Self::render_content(display, &st, self.current_page, self.edit_mode,
@@ -266,7 +278,7 @@ impl Display {
     /// Show boot screen
     pub fn boot_screen(&mut self) {
         let display = match &mut self.display { Some(d) => d, None => return };
-        display.clear();
+        display.clear_buffer();
         FONT_LARGE.render_aligned("Wolf CWL", Point::new(64, 20),
             VerticalPosition::Top, HorizontalAlignment::Center,
             FontColor::Transparent(BinaryColor::On), display).ok();
@@ -496,10 +508,10 @@ fn draw_status(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner)
     let s2 = format!("Filter:  {}", if st.cwl_data.filter_dirty { "REPLACE" } else { "OK" });
     draw_small(d, &s2, 0, 25);
     let s3 = format!("Mode:    {}", if st.requested_bypass_open { "Summer" } else { "Winter" });
-    draw_small(d, &s3, 0, 36);
+    draw_small(d, &s3, 0, 35);
     if st.cwl_data.tsp_valid[52] {
         let s4 = format!("Airflow: {} m3/h", st.cwl_data.current_volume);
-        draw_small(d, &s4, 0, 43);
+        draw_small(d, &s4, 0, 46);
     }
 }
 
@@ -517,7 +529,7 @@ fn draw_system(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner)
     draw_small(d, if st.mqtt_connected { "MQTT: online" } else { "MQTT: offline" }, 0, 25);
     let uptime_s = unsafe { esp_idf_svc::sys::esp_timer_get_time() / 1_000_000 } as u64;
     let up_str = format!("Up: {}h {}m", uptime_s / 3600, (uptime_s % 3600) / 60);
-    draw_small(d, &up_str, 0, 36);
+    draw_small(d, &up_str, 0, 35);
     let reason = format!("Boot: {}", crate::watchdog::reboot_reason());
-    draw_small(d, &reason, 0, 43);
+    draw_small(d, &reason, 0, 46);
 }

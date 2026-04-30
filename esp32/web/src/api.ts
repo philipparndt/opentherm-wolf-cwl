@@ -129,6 +129,27 @@ export async function resumeSchedule(): Promise<boolean> {
   return res.ok
 }
 
+export async function downloadBackup(): Promise<void> {
+  const res = await request('/api/backup')
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'wolf-cwl-backup.json'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function restoreBackup(file: File): Promise<boolean> {
+  const text = await file.text()
+  const res = await request('/api/restore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: text
+  })
+  return res.ok
+}
+
 export async function sendEncoderAction(action: 'left' | 'right' | 'press'): Promise<boolean> {
   const res = await request('/api/encoder', {
     method: 'POST',
