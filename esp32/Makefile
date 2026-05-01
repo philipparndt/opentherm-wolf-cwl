@@ -1,205 +1,89 @@
-# Wolf CWL OpenTherm Controller - Build & Deploy Makefile
-# ======================================================
+# Wolf CWL OpenTherm Controller - Rust Firmware
+# ==============================================
 
 # Configuration
-ENV ?= esp32-poe
-HOST ?= wolf-cwl.local
-USER ?= admin
-PASS ?= admin
-
-# Python venv (for PlatformIO - requires Python 3.10-3.13)
-VENV_DIR := .venv
-PYTHON := $(shell which python3.12 python3.11 python3.10 2>/dev/null | head -1)
-PIO := $(shell if [ -x $(VENV_DIR)/bin/pio ]; then echo $(VENV_DIR)/bin/pio; else echo pio; fi)
-
-# Colors
-GREEN := \033[0;32m
-YELLOW := \033[1;33m
-CYAN := \033[0;36m
-RED := \033[0;31m
-NC := \033[0m
+PORT ?= /dev/cu.wchusbserial8310
+FEATURES ?= ethernet,simulate-ot,ot-uext
 
 # Paths
-WEB_DIR := web
-DATA_DIR := data
-BUILD_DIR := .pio/build/$(ENV)
+WEB_SRC := web
+WEB_OUT := data
+PARTITIONS := partitions.csv
+SPIFFS_IMG := /tmp/wolf-cwl-spiffs.bin
+SPIFFS_SIZE := 0xF0000
+SPIFFS_OFFSET := 0x310000
+SPIFFSGEN := .embuild/espressif/esp-idf/v5.2.3/components/spiffs/spiffsgen.py
+ESPTOOL_PY := .embuild/espressif/python_env/idf5.2_py3.14_env/bin/python3
 
-.PHONY: all build build-web build-firmware build-fs clean deploy deploy-firmware deploy-fs \
-        dev monitor help install-deps setup-venv build-sim upload-sim monitor-sim debug
+# Colors
+CYAN := \033[36m
+GREEN := \033[32m
+NC := \033[0m
 
-# Default target
-all: build
-
-# ==========================================
-# Help
-# ==========================================
+.PHONY: build flash monitor flash-monitor dev build-web build-fs flash-fs flash-all clean help
 
 help:
+	@echo "$(CYAN)Wolf CWL Rust Firmware$(NC)"
 	@echo ""
-	@echo "$(YELLOW)Wolf CWL OpenTherm Controller - Build & Deploy$(NC)"
-	@echo "================================================="
-	@echo ""
-	@echo "$(CYAN)Build targets:$(NC)"
-	@echo "  make build          - Build everything (web + firmware + filesystem)"
-	@echo "  make build-web      - Build web UI only (outputs to data/)"
-	@echo "  make build-firmware - Build firmware only"
-	@echo "  make build-fs       - Build filesystem image only"
-	@echo ""
-	@echo "$(CYAN)Deploy targets:$(NC)"
-	@echo "  make deploy         - Build and deploy everything via OTA"
-	@echo "  make deploy-firmware- Build and deploy firmware only via OTA"
-	@echo "  make deploy-fs      - Build and deploy filesystem only via OTA"
-	@echo ""
-	@echo "$(CYAN)Setup:$(NC)"
-	@echo "  make setup-venv     - Create Python venv and install PlatformIO"
-	@echo "  make install-deps   - Install npm dependencies for web"
-	@echo ""
-	@echo "$(CYAN)Development:$(NC)"
-	@echo "  make dev            - Start web dev server with hot reload"
+	@echo "  make dev            - Build, flash and monitor (simulation mode)"
+	@echo "  make build          - Build firmware"
+	@echo "  make flash          - Build and flash firmware via USB"
 	@echo "  make monitor        - Open serial monitor"
-	@echo "  make clean          - Clean all build artifacts"
+	@echo "  make build-web      - Build web UI"
+	@echo "  make build-fs       - Build web UI + create SPIFFS image"
+	@echo "  make flash-fs       - Flash SPIFFS image"
+	@echo "  make flash-all      - Flash firmware + SPIFFS (preserves NVS)"
+	@echo "  make flash-init     - First-time: flash with partition table (erases NVS!)"
+	@echo "  make clean          - Clean build artifacts"
 	@echo ""
-	@echo "$(CYAN)USB upload (requires physical connection):$(NC)"
-	@echo "  make upload         - Upload firmware via USB"
-	@echo "  make upload-fs      - Upload filesystem via USB"
-	@echo ""
-	@echo "$(CYAN)Configuration:$(NC)"
-	@echo "  HOST=$(HOST)"
-	@echo "  USER=$(USER)"
-	@echo "  PASS=$(if $(filter environment override command,$(origin PASS)),***,not yet set)"
-	@echo ""
+	@echo "Features: ethernet,simulate-ot (default)"
 
-# ==========================================
-# Build targets
-# ==========================================
+build:
+	@echo "$(CYAN)Building firmware (features: $(FEATURES))...$(NC)"
+	cargo build --release --features "$(FEATURES)"
+	@echo "$(GREEN)Build complete$(NC)"
 
-build: build-web build-firmware build-fs
-	@echo ""
-	@echo "$(GREEN)Build complete!$(NC)"
+flash: build
+	@echo "$(CYAN)Flashing firmware...$(NC)"
+	espflash flash -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
+	@echo "$(GREEN)Flash complete$(NC)"
+
+monitor:
+	espflash monitor -p $(PORT)
+
+flash-monitor: build
+	espflash flash --monitor -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
+
+dev: flash-monitor
+
+# First-time setup: flash with partition table (erases NVS!)
+flash-init: build
+	@echo "$(CYAN)Flashing firmware + partition table (NVS will be erased)...$(NC)"
+	espflash flash -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
+	@echo "$(GREEN)Flash complete$(NC)"
 
 build-web:
 	@echo "$(CYAN)Building web UI...$(NC)"
-	@cd $(WEB_DIR) && npm run build
-	@echo "$(GREEN)Web UI built -> $(DATA_DIR)/$(NC)"
+	cd $(WEB_SRC) && npm run build
+	@echo "$(GREEN)Web UI built to $(WEB_OUT)$(NC)"
 
-build-firmware:
-	@echo "$(CYAN)Building firmware ($(ENV))...$(NC)"
-	@$(PIO) run -e $(ENV)
-	@echo "$(GREEN)Firmware built -> $(BUILD_DIR)/firmware.bin$(NC)"
+build-fs: build-web
+	@echo "$(CYAN)Creating SPIFFS image...$(NC)"
+	$(ESPTOOL_PY) $(SPIFFSGEN) $(SPIFFS_SIZE) $(WEB_OUT) $(SPIFFS_IMG)
+	@echo "$(GREEN)SPIFFS image: $(SPIFFS_IMG)$(NC)"
 
-build-fs:
-	@echo "$(CYAN)Building filesystem ($(ENV))...$(NC)"
-	@$(PIO) run -t buildfs -e $(ENV)
-	@echo "$(GREEN)Filesystem built -> $(BUILD_DIR)/littlefs.bin$(NC)"
+flash-fs: build-fs
+	@echo "$(CYAN)Flashing SPIFFS...$(NC)"
+	$(ESPTOOL_PY) -m esptool --chip esp32 -p $(PORT) write_flash $(SPIFFS_OFFSET) $(SPIFFS_IMG)
+	@echo "$(GREEN)SPIFFS flashed$(NC)"
 
-# ==========================================
-# Deploy targets (OTA)
-# ==========================================
-
-deploy: build
-	@echo ""
-	@echo "$(CYAN)Deploying via OTA to $(HOST)...$(NC)"
-	@./upload-ota.sh --host $(HOST) --user $(USER) --pass $(PASS) $(ENV)
-
-deploy-firmware: build-firmware
-	@echo ""
-	@echo "$(CYAN)Deploying firmware via OTA to $(HOST)...$(NC)"
-	@./upload-ota.sh --firmware --host $(HOST) --user $(USER) --pass $(PASS) $(ENV)
-
-deploy-fs: build-web build-fs
-	@echo ""
-	@echo "$(CYAN)Deploying filesystem via OTA to $(HOST)...$(NC)"
-	@./upload-ota.sh --filesystem --host $(HOST) --user $(USER) --pass $(PASS) $(ENV)
-
-# ==========================================
-# USB Upload targets
-# ==========================================
-
-upload: build-firmware
-	@echo "$(CYAN)Uploading firmware via USB...$(NC)"
-	@$(PIO) run -t upload -e $(ENV)
-
-upload-fs: build-web build-fs
-	@echo "$(CYAN)Uploading filesystem via USB...$(NC)"
-	@$(PIO) run -t uploadfs -e $(ENV)
-
-upload-all: upload upload-fs
-	@echo "$(GREEN)Upload complete!$(NC)"
-
-# ==========================================
-# Development
-# ==========================================
-
-dev:
-	@echo "$(CYAN)Starting web dev server...$(NC)"
-	@echo "$(YELLOW)Note: API calls will fail without the ESP32 backend$(NC)"
-	@cd $(WEB_DIR) && npm run dev
-
-monitor:
-	@$(PIO) device monitor -e $(ENV)
-
-# ==========================================
-# Utilities
-# ==========================================
-
-install-deps:
-	@echo "$(CYAN)Installing web dependencies...$(NC)"
-	@cd $(WEB_DIR) && npm install
-	@echo "$(GREEN)Dependencies installed!$(NC)"
-
-setup-venv:
-	@if [ -z "$(PYTHON)" ]; then \
-		echo "$(RED)Error: No compatible Python (3.10-3.12) found$(NC)"; \
-		echo "Install with: brew install python@3.12"; \
-		exit 1; \
-	fi
-	@echo "$(CYAN)Creating venv with $(PYTHON)...$(NC)"
-	@$(PYTHON) -m venv $(VENV_DIR)
-	@echo "$(CYAN)Installing PlatformIO...$(NC)"
-	@$(VENV_DIR)/bin/pip install --upgrade pip
-	@$(VENV_DIR)/bin/pip install platformio
-	@echo "$(GREEN)Venv ready! PlatformIO installed.$(NC)"
+flash-all: build build-fs
+	@echo "$(CYAN)Flashing firmware + SPIFFS...$(NC)"
+	espflash flash -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
+	$(ESPTOOL_PY) -m esptool --chip esp32 -p $(PORT) write_flash $(SPIFFS_OFFSET) $(SPIFFS_IMG)
+	@echo "$(GREEN)All flashed$(NC)"
+	espflash monitor -p $(PORT)
 
 clean:
-	@echo "$(CYAN)Cleaning build artifacts...$(NC)"
-	@$(PIO) run -t clean -e $(ENV) 2>/dev/null || true
-	@rm -rf $(WEB_DIR)/node_modules/.vite
-	@rm -f $(DATA_DIR)/app.js $(DATA_DIR)/style.css $(DATA_DIR)/index.html
-	@rm -f $(DATA_DIR)/*.gz
-	@echo "$(GREEN)Clean complete!$(NC)"
-
-clean-all: clean
-	@rm -rf .pio
-	@rm -rf $(WEB_DIR)/node_modules
-	@echo "$(GREEN)Full clean complete!$(NC)"
-
-check-host:
-	@echo -n "Checking connectivity to $(HOST)... "
-	@ping -c 1 -W 2 $(HOST) > /dev/null 2>&1 && \
-		echo "$(GREEN)OK$(NC)" || \
-		(echo "$(RED)Failed$(NC)" && exit 1)
-
-# ==========================================
-# Simulation (fake OpenTherm data, no hardware needed)
-# ==========================================
-
-build-sim:
-	@echo "$(CYAN)Building firmware (simulation mode)...$(NC)"
-	@$(PIO) run -e esp32-sim
-	@echo "$(GREEN)Simulation firmware built$(NC)"
-
-upload-sim: build-sim
-	@echo "$(CYAN)Uploading simulation firmware via USB...$(NC)"
-	@$(PIO) run -t upload -e esp32-sim
-
-monitor-sim:
-	@$(PIO) device monitor -e esp32-sim
-
-debug: build-web
-	@echo "$(CYAN)Building and uploading simulation firmware + filesystem (esp32-poe-sim)...$(NC)"
-	@$(PIO) run -e esp32-poe-sim
-	@$(PIO) run -t buildfs -e esp32-poe-sim
-	@$(PIO) run -t upload -e esp32-poe-sim
-	@$(PIO) run -t uploadfs -e esp32-poe-sim
-	@echo "$(GREEN)Debug device ready! Starting serial monitor...$(NC)"
-	@$(PIO) device monitor -e esp32-poe-sim
+	cargo clean
+	rm -f $(SPIFFS_IMG)

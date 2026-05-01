@@ -39,13 +39,10 @@ go.work.sum
 *.sal
 *.csv
 decode/decode
-esp32/.venv
-esp32/.pio
+esp32/target
+esp32/.embuild
 esp32/data
 esp32/web/node_modules
-esp32-rust/target
-esp32-rust/.embuild
-esp32/.vscode
 
 # PCB
 pcb/.venv
