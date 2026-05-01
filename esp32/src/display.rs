@@ -65,7 +65,12 @@ pub struct Display {
 impl Display {
     pub fn new(i2c: I2cDriver<'static>, state: AppState) -> Self {
         let interface = I2CDisplayInterface::new(i2c);
-        let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+        let rotation = if cfg!(feature = "display-rotate") {
+            DisplayRotation::Rotate180
+        } else {
+            DisplayRotation::Rotate0
+        };
+        let mut display = Ssd1306::new(interface, DisplaySize128x64, rotation)
             .into_buffered_graphics_mode();
 
         let mut ok = false;

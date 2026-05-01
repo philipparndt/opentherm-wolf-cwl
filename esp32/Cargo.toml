@@ -5,12 +5,13 @@ edition = "2021"
 resolver = "2"
 
 [features]
-default = ["wifi", "ot-uext"]
+default = ["wifi", "ot-uext", "display-rotate"]
 wifi = []
 ethernet = []
 simulate-ot = []
-ot-uext = []   # OT on UEXT TXD(GPIO1)/RXD(GPIO3) — default, no extra wires
-ot-ext = []    # OT on GPIO4/GPIO36 via J4 EXT header — fallback, keeps serial debug
+ot-uext = []        # OT on UEXT TXD(GPIO1)/RXD(GPIO3) — default, no extra wires
+ot-ext = []         # OT on GPIO4/GPIO36 via J4 EXT header — fallback, keeps serial debug
+display-rotate = [] # Rotate display 180° (for upside-down mounting)
 
 [dependencies]
 esp-idf-svc = { version = "0.51", features = ["binstart"] }
