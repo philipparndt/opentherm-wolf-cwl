@@ -22,7 +22,7 @@ export KICAD_SYMBOL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/
 export KICAD9_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
 export KICAD_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
 
-.PHONY: generate generate-3d export-stl-full export-stl-board export-stl-parts clean setup setup-3d help
+.PHONY: generate generate-3d export-stl-full export-stl-board export-stl-parts gerber clean setup setup-3d help
 
 help:
 	@echo "Wolf CWL Shield PCB"
@@ -33,6 +33,7 @@ help:
 	@echo "  make export-stl-full  - Export full PCB assembly as STL"
 	@echo "  make export-stl-board - Export bare PCB only as STL"
 	@echo "  make export-stl-parts - Export components only as STL (no board)"
+	@echo "  make gerber           - Export Gerbers + drill files for fabrication"
 	@echo "  make clean            - Remove generated files and venvs"
 
 setup: $(VENV)/bin/activate
@@ -84,10 +85,30 @@ export-stl-parts:
 	@rm -f cwl/cwl-parts.step
 	@echo "Exported: cwl/cwl-parts.stl"
 
+gerber:
+	@echo "Exporting Gerbers for fabrication..."
+	@mkdir -p cwl/gerber
+	$(KICAD_CLI) pcb export gerbers \
+		--use-drill-file-origin \
+		--no-netlist \
+		--subtract-soldermask \
+		-l "F.Cu,B.Cu,F.Paste,B.Paste,F.SilkS,B.SilkS,F.Mask,B.Mask,Edge.Cuts" \
+		-o cwl/gerber/ \
+		$(KICAD_PROJECT)
+	$(KICAD_CLI) pcb export drill \
+		--format excellon \
+		--drill-origin plot \
+		--excellon-units mm \
+		-o cwl/gerber/ \
+		$(KICAD_PROJECT)
+	@cd cwl/gerber && zip -q ../cwl-gerber.zip *
+	@echo "Exported: cwl/cwl-gerber.zip"
+
 clean:
 	rm -rf $(VENV) $(VENV_3D)
 	rm -f wolf-cwl-shield.net
 	rm -f cwl/cwl-assembly.stl cwl/cwl-board.stl cwl/cwl-parts.stl
 	rm -f cwl/cwl-assembly.step cwl/cwl-board.step cwl/cwl-parts.step
+	rm -rf cwl/gerber cwl/cwl-gerber.zip
 	rm -f *.xml
 	rm -rf __pycache__

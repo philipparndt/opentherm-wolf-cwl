@@ -8504,6 +8504,17 @@
 		)
 	)
 	(gr_rect
+		(start 83.06 52.38)
+		(end 98.69 62.92)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "B.SilkS")
+		(uuid "b8165321-60ca-424c-ab8f-f8dbe8d9df9b")
+	)
+	(gr_rect
 		(start 71.77898 40.096349)
 		(end 137.879999 75.069999)
 		(radius 3.5)
@@ -8526,6 +8537,66 @@
 				(bold yes)
 			)
 			(justify left bottom)
+		)
+	)
+	(gr_text "UEXT"
+		(at 90.14 62.46 0)
+		(layer "B.SilkS")
+		(uuid "fe6ea0e7-763b-4355-b24e-ec96754c353d")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom mirror)
+		)
+	)
+	(gr_text "J4"
+		(at 94.03 62.46 0)
+		(layer "B.SilkS")
+		(uuid "ac8b763e-c4e3-44a5-92e3-9ba8044df83a")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom mirror)
+		)
+	)
+	(gr_text "Configure"
+		(at 94.42 54.31 0)
+		(layer "B.SilkS")
+		(uuid "245f1dbc-4060-4e57-b996-ddbf88b67501")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom mirror)
+		)
+	)
+	(gr_text " J5 (AUX)\n 1: +3V3\n 2: GND\n 3: TXD\n 4: RXD"
+		(at 124.94 72.88 0)
+		(layer "B.SilkS")
+		(uuid "880cbc44-d2f5-4a01-b86a-b11cd235980a")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom mirror)
+		)
+	)
+	(gr_text "J4 (EXT_GPIO)\n1: GPIO4 (OT TX)\n2: GPIO36 (OT RX)\n3: GND"
+		(at 135.89 61.76 0)
+		(layer "B.SilkS")
+		(uuid "3e33e5ca-fdd4-4e62-a4a8-b2de660f1e3c")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom mirror)
 		)
 	)
 	(segment

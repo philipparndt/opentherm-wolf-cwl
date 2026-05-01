@@ -44,7 +44,7 @@ Additional signals from the ESP32-POE EXT1/EXT2 headers:
 |-----|-----------|----------|--------------|-------------|-----|
 | U1, U2 | LTV-817S-B | 859-LTV-817S-B | Lite-On | Optocoupler, SOP-4 SMD (PC817 compatible) | 2 |
 | Q1 | 2N7002 | 512-2N7002 | onsemi | N-MOSFET, SOT-23, 60V 200mA | 1 |
-| D1 | BZX384-C4V7,115 | 771-BZX384-C4V7115 | Nexperia | 4.7V Zener, SOD-323, 300mW | 1 |
+| D1 | MMSZ4V7T1G | 863-MMSZ4V7T1G | onsemi | 4.7V Zener, SOD-323, 500mW | 1 |
 | D2-D5 | 1N4148WS | 512-1N4148WS | onsemi | Switching diode, SOD-323, 100V (bus protection, polarity-independent) | 4 |
 | R1 | RC0603FR-07330RL | 603-RC0603FR-07330RL | Yageo | 330Ω, 0603, 1%, thick film | 1 |
 | R2 | RC0603FR-07680RL | 603-RC0603FR-07680RL | Yageo | 680Ω, 0603, 1%, thick film | 1 |

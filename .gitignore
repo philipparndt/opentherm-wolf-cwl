@@ -66,3 +66,5 @@ pcb/cwl/.history
 pcb/.history
 wolf-cwl-core/target
 *.log
+pcb/cwl/gerber
+pcb/cwl/cwl-gerber.zip
