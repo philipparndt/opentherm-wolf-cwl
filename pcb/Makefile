@@ -22,7 +22,7 @@ export KICAD_SYMBOL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/
 export KICAD9_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
 export KICAD_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
 
-.PHONY: generate generate-3d export-stl-full export-stl-board export-stl-parts gerber clean setup setup-3d help
+.PHONY: generate generate-3d export-stl-full export-stl-board export-stl-parts export-stl-print gerber clean setup setup-3d help
 
 help:
 	@echo "Wolf CWL Shield PCB"
@@ -31,6 +31,7 @@ help:
 	@echo "  make generate         - Generate KiCad netlist"
 	@echo "  make generate-3d      - Generate 3D STEP models (requires Python 3.12)"
 	@echo "  make export-stl-full  - Export full PCB assembly as STL"
+	@echo "  make export-stl-print - Export for 3D printing (floating IDC connector)"
 	@echo "  make export-stl-board - Export bare PCB only as STL"
 	@echo "  make export-stl-parts - Export components only as STL (no board)"
 	@echo "  make gerber           - Export Gerbers + drill files for fabrication"
@@ -66,13 +67,26 @@ generate-3d: setup-3d
 
 export-stl-full:
 	@echo "Exporting full PCB assembly..."
+	@touch cwl/cwl-assembly.step
 	$(KICAD_CLI) pcb export step --force --include-tracks --include-pads --include-silkscreen --include-soldermask --output cwl/cwl-assembly.step $(KICAD_PROJECT)
 	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/cwl/cwl-assembly.step','$(CURDIR)/cwl/cwl-assembly.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null
 	@rm -f cwl/cwl-assembly.step
 	@echo "Exported: cwl/cwl-assembly.stl"
 
+export-stl-print:
+	@echo "Exporting for 3D printing (floating IDC connector)..."
+	@cp 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step.bak
+	@cp 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical_printable.step 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step
+	@touch cwl/cwl-assembly-print.step
+	$(KICAD_CLI) pcb export step --force --include-tracks --include-pads --include-silkscreen --include-soldermask --output cwl/cwl-assembly-print.step $(KICAD_PROJECT)
+	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/cwl/cwl-assembly-print.step','$(CURDIR)/cwl/cwl-assembly-print.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null
+	@rm -f cwl/cwl-assembly-print.step
+	@mv 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step.bak 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step
+	@echo "Exported: cwl/cwl-assembly-print.stl"
+
 export-stl-board:
 	@echo "Exporting bare PCB..."
+	@touch cwl/cwl-board.step
 	$(KICAD_CLI) pcb export step --force --no-components --include-tracks --include-pads --include-silkscreen --include-soldermask --output cwl/cwl-board.step $(KICAD_PROJECT)
 	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/cwl/cwl-board.step','$(CURDIR)/cwl/cwl-board.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null
 	@rm -f cwl/cwl-board.step
@@ -80,6 +94,7 @@ export-stl-board:
 
 export-stl-parts:
 	@echo "Exporting components only..."
+	@touch cwl/cwl-parts.step
 	$(KICAD_CLI) pcb export step --force --subst-models --no-board-body --output cwl/cwl-parts.step $(KICAD_PROJECT)
 	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/cwl/cwl-parts.step','$(CURDIR)/cwl/cwl-parts.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null
 	@rm -f cwl/cwl-parts.step

@@ -7,17 +7,21 @@ Output: 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step
 
 import cadquery as cq
 
-# Set to True for 3D printing prototype (large cavity instead of pin holes)
-PRINTABLE = True
+# When True, generates both normal and printable IDC variants
+# Printable version: hollow cavity, no pins (connector floats over ESP32 header)
+GENERATE_BOTH = True
 
 
-def idc_female_socket_2x05():
+def idc_female_socket_2x05(printable=False):
     """
     2x5 IDC female socket, 2.54mm pitch.
     Body: 17.1 x 5.8 x 9.5mm
     Keying bump: 3.7mm wide, 1.3mm standout, 6mm tall from top
     Chamfer: 1.2mm wide, 2.8mm tall on top edges
     Rectangular pin holes
+
+    printable=True: large hollow cavity (for 3D printing over ESP32 header),
+                    no pin tails (connector floats, not soldered)
     """
     pitch = 2.54
     cols = 5
@@ -43,11 +47,12 @@ def idc_female_socket_2x05():
     cx = (cols - 1) * pitch / 2
     cy = (rows - 1) * pitch / 2
 
-    # Main body
+    # Main body — for printable, extend housing down to PCB surface
+    base_ext = 0.25 if printable else 0  # extend down to close the gap to PCB
     body = (
         cq.Workplane("XY")
-        .box(body_l, body_d, body_h, centered=(True, True, False))
-        .translate((cx, cy, 0))
+        .box(body_l, body_d, body_h + base_ext, centered=(True, True, False))
+        .translate((cx, cy, -base_ext))
     )
 
     # Chamfer on the two short edges on top (left + right sides)
@@ -61,7 +66,7 @@ def idc_female_socket_2x05():
     )
     body = body.union(bump)
 
-    if PRINTABLE:
+    if printable:
         # 3D printing: hollow out the inside to fit over ESP32-POE box header
         cavity_w = (cols - 1) * pitch + 2.0
         cavity_d = (rows - 1) * pitch + 2.0
@@ -89,28 +94,40 @@ def idc_female_socket_2x05():
                 body = body.cut(hole)
 
     # Pin tails below PCB
-    pin_bodies = cq.Workplane("XY")
-    for col in range(cols):
-        for row in range(rows):
-            x = col * pitch
-            y = row * pitch
-            pin = (
-                cq.Workplane("XY")
-                .box(pin_sq, pin_sq, pin_below, centered=(True, True, False))
-                .translate((x, y, -pin_below))
-            )
-            pin_bodies = pin_bodies.union(pin)
+    if printable:
+        # Printable: pins are part of the housing (one solid piece, no gap)
+        for col in range(cols):
+            for row in range(rows):
+                x = col * pitch
+                y = row * pitch
+                pin = (
+                    cq.Workplane("XY")
+                    .box(pin_sq, pin_sq, pin_below, centered=(True, True, False))
+                    .translate((x, y, -pin_below))
+                )
+                body = body.union(pin)
+        pin_bodies = None
+    else:
+        # Normal: pins are a separate body (different color in assembly)
+        pin_bodies = cq.Workplane("XY")
+        for col in range(cols):
+            for row in range(rows):
+                x = col * pitch
+                y = row * pitch
+                pin = (
+                    cq.Workplane("XY")
+                    .box(pin_sq, pin_sq, pin_below, centered=(True, True, False))
+                    .translate((x, y, -pin_below))
+                )
+                pin_bodies = pin_bodies.union(pin)
 
-    # Apply rotation (90° Z) and offset (x=2.5, y=-10.15, z=0.25)
-    # to align with the KiCad footprint pads
-    import math
-    angle = math.radians(90)
-
+    # Apply rotation (90° Z) and offset to align with KiCad footprint pads
     def transform(shape):
         return shape.rotateAboutCenter((0, 0, 1), 90).translate((2.5 - 6.3, -10.15 + 3.8, 0.25))
 
     body = transform(body)
-    pin_bodies = transform(pin_bodies)
+    if pin_bodies:
+        pin_bodies = transform(pin_bodies)
 
     return body, pin_bodies
 
@@ -301,14 +318,22 @@ def main():
     import os
     os.makedirs("3dmodels", exist_ok=True)
 
-    # IDC Socket
-    body, pins = idc_female_socket_2x05()
+    # IDC Socket — normal (with pins, accurate model)
+    body, pins = idc_female_socket_2x05(printable=False)
     assy = cq.Assembly()
     assy.add(body, name="housing", color=cq.Color(0.1, 0.1, 0.1, 1))      # black
     assy.add(pins, name="pins", color=cq.Color(0.83, 0.69, 0.22, 1))      # gold
     output = "3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step"
     assy.export(output) if hasattr(assy, 'export') else assy.save(output)
     print(f"Generated: {output}")
+
+    # IDC Socket — printable (hollow cavity, no pins, floats over header)
+    body_p, _ = idc_female_socket_2x05(printable=True)
+    assy_p = cq.Assembly()
+    assy_p.add(body_p, name="housing", color=cq.Color(0.1, 0.1, 0.1, 1))
+    output_p = "3dmodels/IDC-Socket_2x05_P2.54mm_Vertical_printable.step"
+    assy_p.export(output_p) if hasattr(assy_p, 'export') else assy_p.save(output_p)
+    print(f"Generated: {output_p}")
 
     # OLED Module
     pcb, glass_dark, glass_trans, display, fpc, pins, spacer = oled_sh1106_1_3inch()
