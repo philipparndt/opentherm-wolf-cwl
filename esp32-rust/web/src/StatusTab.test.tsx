@@ -17,7 +17,7 @@ function makeStatus(level: number, requestedLevel?: number): Status {
 describe('StatusTab level buttons', () => {
   it('shows the confirmed level as active with no spinner', () => {
     const { container } = render(
-      <StatusTab status={makeStatus(1)} onLevelChange={() => {}} onCancelOff={() => {}} />
+      <StatusTab lang="en" status={makeStatus(1)} onLevelChange={() => {}} onCancelOff={() => {}} />
     )
     const buttons = container.querySelectorAll('.level-btn')
 
@@ -33,7 +33,7 @@ describe('StatusTab level buttons', () => {
   it('immediately selects clicked button with spinner and deselects old button', () => {
     const onLevelChange = vi.fn()
     const { container } = render(
-      <StatusTab status={makeStatus(1)} onLevelChange={onLevelChange} onCancelOff={() => {}} />
+      <StatusTab lang="en" status={makeStatus(1)} onLevelChange={onLevelChange} onCancelOff={() => {}} />
     )
 
     // Click Party (index 3)
@@ -54,7 +54,7 @@ describe('StatusTab level buttons', () => {
 
   it('keeps spinner while CWL has not yet confirmed', () => {
     const { container, rerender } = render(
-      <StatusTab status={makeStatus(1)} onLevelChange={() => {}} onCancelOff={() => {}} />
+      <StatusTab lang="en" status={makeStatus(1)} onLevelChange={() => {}} onCancelOff={() => {}} />
     )
 
     // Click Party
@@ -62,7 +62,7 @@ describe('StatusTab level buttons', () => {
 
     // Status polls but CWL still reports level 1
     rerender(
-      <StatusTab status={makeStatus(1, 3)} onLevelChange={() => {}} onCancelOff={() => {}} />
+      <StatusTab lang="en" status={makeStatus(1, 3)} onLevelChange={() => {}} onCancelOff={() => {}} />
     )
 
     const buttons = container.querySelectorAll('.level-btn')
@@ -79,7 +79,7 @@ describe('StatusTab level buttons', () => {
   it('removes spinner when CWL confirms the new level', () => {
     const onConfirmed = vi.fn()
     const { container, rerender } = render(
-      <StatusTab status={makeStatus(1)} onLevelChange={() => {}} onCancelOff={() => {}} onConfirmed={onConfirmed} />
+      <StatusTab lang="en" status={makeStatus(1)} onLevelChange={() => {}} onCancelOff={() => {}} onConfirmed={onConfirmed} />
     )
 
     // Click Party
@@ -87,7 +87,7 @@ describe('StatusTab level buttons', () => {
 
     // CWL confirms level 3
     rerender(
-      <StatusTab status={makeStatus(3)} onLevelChange={() => {}} onCancelOff={() => {}} onConfirmed={onConfirmed} />
+      <StatusTab lang="en" status={makeStatus(3)} onLevelChange={() => {}} onCancelOff={() => {}} onConfirmed={onConfirmed} />
     )
 
     const buttons = container.querySelectorAll('.level-btn')
@@ -105,7 +105,7 @@ describe('StatusTab level buttons', () => {
 
   it('does not show spinner when clicking the already-confirmed level', () => {
     const { container } = render(
-      <StatusTab status={makeStatus(2)} onLevelChange={() => {}} onCancelOff={() => {}} />
+      <StatusTab lang="en" status={makeStatus(2)} onLevelChange={() => {}} onCancelOff={() => {}} />
     )
 
     // Click Normal (already active)
@@ -120,7 +120,7 @@ describe('StatusTab level buttons', () => {
   it('handles rapid clicks - last click wins', () => {
     const onLevelChange = vi.fn()
     const { container } = render(
-      <StatusTab status={makeStatus(1)} onLevelChange={onLevelChange} onCancelOff={() => {}} />
+      <StatusTab lang="en" status={makeStatus(1)} onLevelChange={onLevelChange} onCancelOff={() => {}} />
     )
 
     const buttons = container.querySelectorAll('.level-btn')

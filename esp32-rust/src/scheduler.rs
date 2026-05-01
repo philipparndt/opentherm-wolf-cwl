@@ -123,13 +123,7 @@ impl Scheduler {
         if !self.timed_off_active {
             let match_index = self.evaluate_ventilation(current_minutes, day_bit);
 
-            // Clear override on schedule transition
             if match_index != self.last_active_index {
-                let mut st = self.state.lock().unwrap();
-                if st.schedule_override {
-                    st.schedule_override = false;
-                    info!("Scheduler: Override cleared (schedule transition)");
-                }
                 self.last_active_index = match_index;
             }
 

@@ -45,6 +45,7 @@ pub struct AppStateInner {
     pub timed_off_request: Option<u8>,  // hours to activate timed off
     pub cancel_timed_off: bool,
     pub persist_timed_off: bool, // flag to save timed-off state to NVS
+    pub persist_config: bool,    // flag to save full config to NVS
 }
 
 impl AppStateInner {
@@ -73,6 +74,7 @@ impl AppStateInner {
             timed_off_request: None,
             cancel_timed_off: false,
             persist_timed_off: false,
+            persist_config: false,
             config,
         }
     }

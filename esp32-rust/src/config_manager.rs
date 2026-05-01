@@ -7,6 +7,7 @@ use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use log::info;
 
 use crate::config::AppConfig;
+use crate::i18n::Language;
 use crate::scheduler::{ScheduleEntry, BypassSchedule};
 
 const NVS_NAMESPACE: &str = "wolfcwl";
@@ -63,6 +64,9 @@ impl ConfigManager {
         config.ventilation_level = self.get_i32("vent_level", 2) as u8;
         config.bypass_open = self.get_bool("bypass_open", false);
 
+        // Language
+        config.language = Language::from_u8(self.get_i32("language", 0) as u8);
+
         info!("Config: Loaded from NVS");
         config
     }
@@ -98,6 +102,9 @@ impl ConfigManager {
         // Ventilation state
         self.set_i32("vent_level", config.ventilation_level as i32)?;
         self.set_bool("bypass_open", config.bypass_open)?;
+
+        // Language
+        self.set_i32("language", config.language as i32)?;
 
         // Mark as configured
         self.set_bool("configured", config.configured)?;

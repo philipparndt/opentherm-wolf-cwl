@@ -1,5 +1,7 @@
 //! Application configuration — mirrors the C++ AppConfig struct.
 
+use crate::i18n::Language;
+
 /// Maximum string field lengths (matching C++ defines)
 #[allow(dead_code)]
 pub const MAX_SSID_LEN: usize = 33;
@@ -47,6 +49,7 @@ pub struct AppConfig {
 
     // System
     pub configured: bool,
+    pub language: Language,
 }
 
 impl Default for AppConfig {
@@ -73,6 +76,7 @@ impl Default for AppConfig {
             ventilation_level: 2, // Normal
             bypass_open: false,
             configured: false,
+            language: Language::En,
         }
     }
 }

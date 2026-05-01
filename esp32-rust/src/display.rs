@@ -16,13 +16,13 @@ use u8g2_fonts::FontRenderer;
 use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
 
 use crate::app_state::AppStateInner;
-use crate::cwl_data::ventilation_level_name;
 use crate::framebuffer::FrameBuffer;
+use crate::i18n::{Language, tr, level_name};
 
 type AppState = Arc<Mutex<AppStateInner>>;
 type Disp = Ssd1306<I2CInterface<I2cDriver<'static>>, DisplaySize128x64, BufferedGraphicsMode<DisplaySize128x64>>;
 
-pub const PAGE_COUNT: usize = 6;
+pub const PAGE_COUNT: usize = 7;
 const STANDBY_TIMEOUT_MS: u32 = 300_000;
 const OVERLAY_TIMEOUT_MS: u32 = 10_000;
 const EDIT_TIMEOUT_MS: u32 = 10_000;
@@ -34,12 +34,12 @@ const FONT_MEDIUM: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB12_t
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Page {
-    Home = 0, Bypass, TempIn, TempOut, Status, System,
+    Home = 0, Bypass, TempIn, TempOut, Status, System, Settings,
 }
 
 impl Page {
     fn from_index(i: usize) -> Self {
-        match i % PAGE_COUNT { 0 => Self::Home, 1 => Self::Bypass, 2 => Self::TempIn, 3 => Self::TempOut, 4 => Self::Status, 5 => Self::System, _ => Self::Home }
+        match i % PAGE_COUNT { 0 => Self::Home, 1 => Self::Bypass, 2 => Self::TempIn, 3 => Self::TempOut, 4 => Self::Status, 5 => Self::System, 6 => Self::Settings, _ => Self::Home }
     }
     fn index(self) -> usize { self as usize }
 }
@@ -169,15 +169,17 @@ impl Display {
         if overlay_active && !edit_mode {
             draw_overlay(d, overlay_header, overlay_message);
         } else if !st.cwl_data.connected && !edit_mode {
-            draw_overlay(d, "CWL", "Disconnected");
+            draw_overlay(d, "CWL", tr(st.config.language).cwl_disconnected);
         } else {
+            let lang = st.config.language;
             match page {
-                Page::Home => draw_home(d, st, edit_mode, edit_vent_level, edit_off_duration, edit_off_hours),
-                Page::Bypass => draw_bypass(d, st, edit_mode, edit_vent_level),
-                Page::TempIn => draw_temp_in(d, st),
-                Page::TempOut => draw_temp_out(d, st),
-                Page::Status => draw_status(d, st),
-                Page::System => draw_system(d, st),
+                Page::Home => draw_home(d, st, lang, edit_mode, edit_vent_level, edit_off_duration, edit_off_hours),
+                Page::Bypass => draw_bypass(d, st, lang, edit_mode, edit_vent_level),
+                Page::TempIn => draw_temp_in(d, st, lang),
+                Page::TempOut => draw_temp_out(d, st, lang),
+                Page::Status => draw_status(d, st, lang),
+                Page::System => draw_system(d, st, lang),
+                Page::Settings => draw_settings(d, st, lang, edit_mode, edit_vent_level),
             }
         }
 
@@ -191,8 +193,8 @@ impl Display {
         if edit_mode && edit_off_duration {
             // Off hours selection — no dots
         } else if edit_mode && (page == Page::Home) {
-            // Level selection — 4 mode dots (Off/Reduced/Normal/Party)
-            let count = 4i32;
+            // Level selection — 5 mode dots (Off/Reduced/Normal/Party/Schedule)
+            let count = 5i32;
             let start = (128 - (count - 1) * 7) / 2;
             for i in 0..count {
                 let style = if i as u8 == edit_vent_level {
@@ -202,8 +204,8 @@ impl Display {
                 };
                 Circle::new(Point::new(start + i * 7 - 2, 59), 5).into_styled(style).draw(d).ok();
             }
-        } else if edit_mode && (page == Page::Bypass) {
-            // Bypass toggle — 2 mode dots (Winter/Summer)
+        } else if edit_mode && (page == Page::Bypass || page == Page::Settings) {
+            // Toggle — 2 mode dots
             let count = 2i32;
             let start = (128 - (count - 1) * 7) / 2;
             for i in 0..count {
@@ -251,7 +253,8 @@ impl Display {
     }
 
     pub fn show_ip(&mut self, ip: &str) {
-        self.overlay_header = "Connected".into();
+        let lang = self.state.lock().unwrap().config.language;
+        self.overlay_header = tr(lang).connected.into();
         self.overlay_message = ip.into();
         self.overlay_start_ms = now();
         self.overlay_active = true;
@@ -259,8 +262,10 @@ impl Display {
     }
 
     pub fn show_disconnected(&mut self) {
-        self.overlay_header = "Disconnected".into();
-        self.overlay_message = "No network".into();
+        let lang = self.state.lock().unwrap().config.language;
+        let s = tr(lang);
+        self.overlay_header = s.disconnected.into();
+        self.overlay_message = s.no_network.into();
         self.overlay_start_ms = now();
         self.overlay_active = true;
         self.last_activity_ms = self.overlay_start_ms;
@@ -278,11 +283,12 @@ impl Display {
     /// Show boot screen
     pub fn boot_screen(&mut self) {
         let display = match &mut self.display { Some(d) => d, None => return };
+        let lang = self.state.lock().unwrap().config.language;
         display.clear_buffer();
         FONT_LARGE.render_aligned("Wolf CWL", Point::new(64, 20),
             VerticalPosition::Top, HorizontalAlignment::Center,
             FontColor::Transparent(BinaryColor::On), display).ok();
-        FONT_SMALL.render_aligned("Connecting...", Point::new(64, 44),
+        FONT_SMALL.render_aligned(tr(lang).connecting, Point::new(64, 44),
             VerticalPosition::Top, HorizontalAlignment::Center,
             FontColor::Transparent(BinaryColor::On), display).ok();
         display.flush().ok();
@@ -304,6 +310,12 @@ impl Display {
             drop(st);
             self.edit_mode = true;
             self.edit_mode_start_ms = now();
+        } else if self.current_page == Page::Settings {
+            let st = self.state.lock().unwrap();
+            self.edit_vent_level = st.config.language as u8;
+            drop(st);
+            self.edit_mode = true;
+            self.edit_mode_start_ms = now();
         }
     }
 
@@ -316,6 +328,13 @@ impl Display {
                 let mut st = self.state.lock().unwrap();
                 st.timed_off_request = Some(self.edit_off_hours);
                 st.display_wake_requested = true;
+            } else if self.edit_vent_level == 4 {
+                // Selected Schedule → clear override, return to schedule control
+                let mut st = self.state.lock().unwrap();
+                if st.timed_off_active {
+                    st.cancel_timed_off = true;
+                }
+                st.schedule_override = false;
             } else if self.edit_vent_level == 0 {
                 // Selected Off → enter duration sub-stage
                 self.edit_off_duration = true;
@@ -323,7 +342,7 @@ impl Display {
                 self.edit_mode_start_ms = now();
                 return false; // Don't exit edit mode
             } else {
-                // Non-off level
+                // Non-off level (Reduced/Normal/Party)
                 let mut st = self.state.lock().unwrap();
                 if st.timed_off_active {
                     st.cancel_timed_off = true;
@@ -337,6 +356,10 @@ impl Display {
             let mut st = self.state.lock().unwrap();
             st.requested_bypass_open = open;
             st.config.bypass_open = open;
+        } else if apply && self.current_page == Page::Settings {
+            let mut st = self.state.lock().unwrap();
+            st.config.language = Language::from_u8(self.edit_vent_level);
+            st.persist_config = true;
         }
         self.edit_mode = false;
         self.edit_off_duration = false;
@@ -352,21 +375,24 @@ impl Display {
                 // Adjusting off duration hours
                 let new_hours = self.edit_off_hours as i32 + delta;
                 if new_hours < 1 {
-                    // Rotate back past 1h → exit duration sub-stage, go to Party
+                    // Rotate back past 1h → exit duration sub-stage, go to Schedule
                     self.edit_off_duration = false;
-                    self.edit_vent_level = 3; // Party
+                    self.edit_vent_level = 4; // Schedule
                 } else if new_hours > 99 {
                     self.edit_off_hours = 99;
                 } else {
                     self.edit_off_hours = new_hours as u8;
                 }
             } else {
-                // Cycling through levels 0-3
-                let new_level = (self.edit_vent_level as i32 + delta).rem_euclid(4) as u8;
+                // Cycling through levels 0-4 (Off/Reduced/Normal/Party/Schedule)
+                let new_level = (self.edit_vent_level as i32 + delta).rem_euclid(5) as u8;
                 self.edit_vent_level = new_level;
             }
         } else if self.current_page == Page::Bypass {
             // Toggle between 0 (winter) and 1 (summer)
+            self.edit_vent_level = if self.edit_vent_level == 0 { 1 } else { 0 };
+        } else if self.current_page == Page::Settings {
+            // Toggle between 0 (English) and 1 (German)
             self.edit_vent_level = if self.edit_vent_level == 0 { 1 } else { 0 };
         }
     }
@@ -431,44 +457,46 @@ fn draw_overlay(d: &mut impl DrawTarget<Color = BinaryColor>, header: &str, mess
     draw_centered(d, message, 30);
 }
 
-fn draw_home(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, edit_mode: bool, edit_level: u8, edit_off_duration: bool, edit_off_hours: u8) {
+fn draw_home(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language, edit_mode: bool, edit_level: u8, edit_off_duration: bool, edit_off_hours: u8) {
+    let s = tr(lang);
     if edit_mode && edit_off_duration {
         // Stage 2: selecting off duration
-        draw_header(d, "Off Duration");
+        draw_header(d, s.off_duration);
         let buf = format!("{}h", edit_off_hours);
         draw_centered(d, &buf, 22);
-        draw_small_centered(d, "rotate: hours  press: ok", 42);
+        draw_small_centered(d, s.hint_rotate_hours, 42);
     } else if edit_mode {
         // Stage 1: selecting level
-        draw_header(d, "Set Level");
-        draw_centered(d, ventilation_level_name(edit_level), 22);
-        draw_small_centered(d, "rotate: adjust  press: ok", 42);
+        draw_header(d, s.set_level);
+        draw_centered(d, level_name(lang, edit_level), 22);
+        draw_small_centered(d, s.hint_rotate_adjust, 42);
     } else if st.timed_off_active {
         // Timed off countdown
-        draw_header(d, "Ventilation");
-        draw_centered(d, "Off", 18);
+        draw_header(d, s.ventilation);
+        draw_centered(d, s.level_off, 18);
         let rem = st.timed_off_remaining_min;
-        let info = format!("Resumes in {}h {}m", rem / 60, rem % 60);
+        let info = format!("{} {}h {}m", s.resumes_in, rem / 60, rem % 60);
         draw_small_centered(d, &info, 42);
     } else {
-        draw_header(d, "Ventilation");
-        draw_centered(d, ventilation_level_name(st.cwl_data.ventilation_level), 18);
+        draw_header(d, s.ventilation);
+        draw_centered(d, level_name(lang, st.cwl_data.ventilation_level), 18);
         let ind = if st.schedule_override { " M" } else if st.schedule_active { " S" } else { "" };
-        let mode = if st.requested_bypass_open { "Summer" } else { "Winter" };
+        let mode = if st.requested_bypass_open { s.summer } else { s.winter };
         let info = format!("{}%{}  {}", st.cwl_data.relative_ventilation, ind, mode);
         draw_small_centered(d, &info, 42);
     }
 }
 
-fn draw_bypass(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, edit_mode: bool, edit_vent_level: u8) {
+fn draw_bypass(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language, edit_mode: bool, edit_vent_level: u8) {
+    let s = tr(lang);
     if edit_mode {
-        draw_header(d, "Set Mode");
-        draw_centered(d, if edit_vent_level != 0 { "Summer" } else { "Winter" }, 22);
-        draw_small_centered(d, "rotate: toggle  press: ok", 42);
+        draw_header(d, s.set_mode);
+        draw_centered(d, if edit_vent_level != 0 { s.summer } else { s.winter }, 22);
+        draw_small_centered(d, s.hint_rotate_toggle, 42);
     } else {
-        draw_header(d, "Summer Mode");
-        draw_centered(d, if st.requested_bypass_open { "Active" } else { "Inactive" }, 18);
-        let desc = if st.requested_bypass_open { "Bypass open - free cooling" } else { "Heat recovery active" };
+        draw_header(d, s.summer_mode);
+        draw_centered(d, if st.requested_bypass_open { s.active } else { s.inactive }, 18);
+        let desc = if st.requested_bypass_open { s.bypass_open_desc } else { s.heat_recovery_desc };
         draw_small_centered(d, desc, 42);
     }
 }
@@ -483,53 +511,71 @@ fn draw_temp_value(d: &mut impl DrawTarget<Color = BinaryColor>, label: &str, te
     draw_large_left(d, &val, 52, y);
 }
 
-fn draw_temp_in(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner) {
-    draw_header(d, "Intake");
-    draw_temp_value(d, "Supply:", st.cwl_data.supply_inlet_temp, 18);
-    draw_temp_value(d, "Exhaust:", st.cwl_data.exhaust_inlet_temp, 38);
+fn draw_temp_in(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
+    let s = tr(lang);
+    draw_header(d, s.intake);
+    draw_temp_value(d, s.supply, st.cwl_data.supply_inlet_temp, 18);
+    draw_temp_value(d, s.exhaust, st.cwl_data.exhaust_inlet_temp, 38);
 }
 
-fn draw_temp_out(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner) {
-    draw_header(d, "Outlet");
+fn draw_temp_out(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
+    let s = tr(lang);
+    draw_header(d, s.outlet);
     let mut y = 18i32;
     if st.cwl_data.supports_id81 {
-        draw_temp_value(d, "Supply:", st.cwl_data.supply_outlet_temp, y);
+        draw_temp_value(d, s.supply, st.cwl_data.supply_outlet_temp, y);
         y += 20;
     }
     if st.cwl_data.supports_id83 {
-        draw_temp_value(d, "Exhaust:", st.cwl_data.exhaust_outlet_temp, y);
+        draw_temp_value(d, s.exhaust, st.cwl_data.exhaust_outlet_temp, y);
     }
 }
 
-fn draw_status(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner) {
-    draw_header(d, "Status");
-    let s1 = format!("Fault:   {}", if st.cwl_data.fault { "YES" } else { "No" });
+fn draw_status(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
+    let s = tr(lang);
+    draw_header(d, s.status);
+    let s1 = format!("{} {}", s.fault, if st.cwl_data.fault { s.yes } else { s.no });
     draw_small(d, &s1, 0, 14);
-    let s2 = format!("Filter:  {}", if st.cwl_data.filter_dirty { "REPLACE" } else { "OK" });
+    let s2 = format!("{} {}", s.filter, if st.cwl_data.filter_dirty { s.replace } else { s.ok });
     draw_small(d, &s2, 0, 25);
-    let s3 = format!("Mode:    {}", if st.requested_bypass_open { "Summer" } else { "Winter" });
+    let s3 = format!("{} {}", s.mode, if st.requested_bypass_open { s.summer } else { s.winter });
     draw_small(d, &s3, 0, 35);
     if st.cwl_data.tsp_valid[52] {
-        let s4 = format!("Airflow: {} m3/h", st.cwl_data.current_volume);
+        let s4 = format!("{} {} m3/h", s.airflow, st.cwl_data.current_volume);
         draw_small(d, &s4, 0, 46);
     }
 }
 
-fn draw_system(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner) {
-    draw_header(d, "System");
+fn draw_settings(d: &mut impl DrawTarget<Color = BinaryColor>, _st: &AppStateInner, lang: Language, edit_mode: bool, edit_level: u8) {
+    let s = tr(lang);
+    draw_header(d, s.settings);
+    if edit_mode {
+        let name = if edit_level == 0 { s.english } else { s.deutsch };
+        draw_centered(d, name, 22);
+        draw_small_centered(d, s.hint_rotate_toggle, 42);
+    } else {
+        draw_small(d, s.language_label, 0, 18);
+        let current = if lang == Language::En { s.english } else { s.deutsch };
+        draw_centered(d, current, 30);
+    }
+}
+
+fn draw_system(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
+    let s = tr(lang);
+    draw_header(d, s.system);
     let net_str = if st.network_connected {
         match &st.ip_address {
             Some(ip) => format!("Net: {}", ip),
-            None => "Net: connected".into(),
+            None => s.net_connected.into(),
         }
     } else {
-        "Net: disconnected".into()
+        s.net_disconnected.into()
     };
     draw_small(d, &net_str, 0, 14);
-    draw_small(d, if st.mqtt_connected { "MQTT: online" } else { "MQTT: offline" }, 0, 25);
+    draw_small(d, if st.mqtt_connected { s.mqtt_online } else { s.mqtt_offline }, 0, 25);
     let uptime_s = unsafe { esp_idf_svc::sys::esp_timer_get_time() / 1_000_000 } as u64;
-    let up_str = format!("Up: {}h {}m", uptime_s / 3600, (uptime_s % 3600) / 60);
+    let up_str = format!("{} {}h {}m", s.uptime_prefix, uptime_s / 3600, (uptime_s % 3600) / 60);
     draw_small(d, &up_str, 0, 35);
-    let reason = format!("Boot: {}", crate::watchdog::reboot_reason());
+    let reason = format!("{} {}", s.boot_prefix, crate::watchdog::reboot_reason());
     draw_small(d, &reason, 0, 46);
 }

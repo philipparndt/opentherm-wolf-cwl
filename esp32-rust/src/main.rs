@@ -5,6 +5,7 @@ mod cwl_data;
 mod display;
 mod encoder;
 mod framebuffer;
+pub mod i18n;
 mod mqtt;
 mod network;
 #[cfg(not(feature = "simulate-ot"))]
@@ -249,6 +250,18 @@ fn main() {
                 let mut mgr = config_manager::ConfigManager::new(nvs_partition.clone()).unwrap();
                 mgr.save_timed_off_end(end_epoch).ok();
                 mgr.save_override_state(override_active).ok();
+            }
+        }
+
+        // Persist full config to NVS when requested (e.g. language change)
+        {
+            let mut st = state.lock().unwrap();
+            if st.persist_config {
+                st.persist_config = false;
+                let config = st.config.clone();
+                drop(st);
+                let mut mgr = config_manager::ConfigManager::new(nvs_partition.clone()).unwrap();
+                mgr.save(&config).ok();
             }
         }
 

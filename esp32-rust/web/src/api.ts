@@ -13,6 +13,7 @@ export interface Config {
   web: { username: string; password: string }
   pins: { otIn: number; otOut: number; sda: number; scl: number; encClk: number; encDt: number; encSw: number }
   configured: boolean
+  language?: string
 }
 
 async function request(url: string, options?: RequestInit) {

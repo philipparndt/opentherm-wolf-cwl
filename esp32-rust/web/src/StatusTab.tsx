@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'preact/hooks'
 import { resumeSchedule } from './api'
 import type { Status } from './api'
+import { t, type Lang } from './translations'
 
-const LEVELS = ['Off', 'Reduced', 'Normal', 'Party'] as const
-
-export function StatusTab({ status, onLevelChange, onCancelOff, onConfirmed }: {
+export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirmed }: {
   status: Status | null
+  lang: Lang
   onLevelChange: (level: number) => void
   onCancelOff: () => void
   onConfirmed?: () => void
@@ -46,9 +46,9 @@ export function StatusTab({ status, onLevelChange, onCancelOff, onConfirmed }: {
         </div>
       )}
       <div class="card">
-        <h3>Ventilation</h3>
+        <h3>{t(lang).ventilation}</h3>
         <div class="level-buttons">
-          {LEVELS.map((name, i) => {
+          {t(lang).levels.map((name, i) => {
             const isSelected = displayLevel === i
             const isPending = localPending === i
             return (
@@ -63,9 +63,9 @@ export function StatusTab({ status, onLevelChange, onCancelOff, onConfirmed }: {
         )}
       </div>
       <div class="card">
-        <h3>Temperatures</h3>
-        <div class="stat"><span class="label">Supply inlet</span><span class="value">{status.temperature.supplyInlet.toFixed(1)} °C</span></div>
-        <div class="stat"><span class="label">Exhaust inlet</span><span class="value">{status.temperature.exhaustInlet.toFixed(1)} °C</span></div>
+        <h3>{t(lang).temperatures}</h3>
+        <div class="stat"><span class="label">{t(lang).supplyInlet}</span><span class="value">{status.temperature.supplyInlet.toFixed(1)} °C</span></div>
+        <div class="stat"><span class="label">{t(lang).exhaustInlet}</span><span class="value">{status.temperature.exhaustInlet.toFixed(1)} °C</span></div>
       </div>
       <div class="card">
         <h3>Status</h3>

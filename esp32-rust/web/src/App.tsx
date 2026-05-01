@@ -5,6 +5,7 @@ import { login, getStatus, getConfig, saveConfig, setVentilationLevel, uploadFir
          type Status, type Config, type ScheduleEntry, type BypassScheduleData } from './api'
 import { StatusTab } from './StatusTab'
 import { OledMirror } from './OledMirror'
+import { t, type Lang } from './translations'
 
 const LEVELS = ['Off', 'Reduced', 'Normal', 'Party'] as const
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
@@ -111,6 +112,7 @@ function WeekTimeline({ entries, airflow, onEntriesChange }: {
   const editable = !!onEntriesChange
 
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null)
+  const [dragTime, setDragTime] = useState<{ x: number; y: number; text: string } | null>(null)
   const [dragging, setDragging] = useState<{ entryIdx: number; edge: 'start' | 'end' } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; seg: TlSeg; dayIdx: number } | null>(null)
 
@@ -240,10 +242,15 @@ function WeekTimeline({ entries, airflow, onEntriesChange }: {
       }
       updated[entryIdx] = entry
       onEntriesChange(updated)
+      const displayMin = edge === 'start' ? min : (min === 0 ? 1440 : min)
+      const hh = String(Math.floor(displayMin / 60) % 24).padStart(2, '0')
+      const mm = String(displayMin % 60).padStart(2, '0')
+      setDragTime({ x: me.clientX, y: me.clientY, text: `${hh}:${mm}` })
     }
 
     const onUp = () => {
       setDragging(null)
+      setDragTime(null)
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -305,7 +312,8 @@ function WeekTimeline({ entries, airflow, onEntriesChange }: {
         ))}
         <span class="tl-legend-item"><span class="tl-swatch tl-gap" />No program</span>
       </div>
-      {tip && !ctxMenu && <div class="tl-tooltip" style={`left:${tip.x + 12}px;top:${tip.y - 10}px`}>{tip.text}</div>}
+      {dragTime && <div class="tl-drag-time" style={`left:${dragTime.x + 12}px;top:${dragTime.y - 28}px`}>{dragTime.text}</div>}
+      {tip && !ctxMenu && !dragTime && <div class="tl-tooltip" style={`left:${tip.x + 12}px;top:${tip.y - 10}px`}>{tip.text}</div>}
       {ctxMenu && (
         <div class="tl-ctx" style={`left:${ctxMenu.x}px;top:${ctxMenu.y}px`} onClick={(e) => e.stopPropagation()}>
           <div class="tl-ctx-header">{fmt(Math.floor(ctxMenu.seg.start / 60), ctxMenu.seg.start % 60)} - {fmt(Math.floor(ctxMenu.seg.end / 60), ctxMenu.seg.end % 60)}</div>
@@ -399,7 +407,7 @@ function ScheduleDialog({ entry, onSave, onCancel }: { entry: ScheduleEntry; onS
   )
 }
 
-function SchedulesTab({ airflow }: { airflow?: { reduced: number; normal: number; party: number } }) {
+function SchedulesTab({ airflow, lang }: { airflow?: { reduced: number; normal: number; party: number }; lang: Lang }) {
   const [entries, setEntries] = useState<ScheduleEntry[]>([])
   const [bypass, setBypass] = useState<BypassScheduleData>({ enabled: false, startDay: 15, startMonth: 4, endDay: 30, endMonth: 9 })
   const [msg, setMsg] = useState<{ type: string; text: string } | null>(null)
@@ -436,9 +444,8 @@ function SchedulesTab({ airflow }: { airflow?: { reduced: number; normal: number
     <>
       {msg && <div class={`msg ${msg.type}`}>{msg.text}</div>}
 
-      <h2>Ventilation Schedules</h2>
-      {entries.length > 0 && <WeekTimeline entries={entries} airflow={airflow} onEntriesChange={setEntries} />}
-      {entries.length === 0 && <div class="card"><div style="color:var(--text-muted);padding:8px 0">No schedules configured</div></div>}
+      <h2>{t(lang).ventilationSchedules}</h2>
+      <WeekTimeline entries={entries} airflow={airflow} onEntriesChange={setEntries} />
       {(() => {
         type Group = { label: string; items: { entry: ScheduleEntry; idx: number }[] }
         const groups: Group[] = []
@@ -473,7 +480,7 @@ function SchedulesTab({ airflow }: { airflow?: { reduced: number; normal: number
           </div>
         ))
       })()}
-      {entries.length < 16 && <button onClick={() => setEditIdx(entries.length)} style="margin-bottom:16px">+ Add Schedule</button>}
+      {entries.length < 16 && <button onClick={() => setEditIdx(entries.length)} style="margin-bottom:16px">{t(lang).addSchedule}</button>}
 
       {editIdx !== null && (
         <ScheduleDialog
@@ -483,7 +490,7 @@ function SchedulesTab({ airflow }: { airflow?: { reduced: number; normal: number
         />
       )}
 
-      <h2>Summer Mode (Cooling)</h2>
+      <h2>{t(lang).summerMode}</h2>
       <div class="card">
         <p style="font-size:0.85em;color:var(--text-muted);margin-bottom:8px">Free cooling — outdoor air bypasses heat exchanger. Enable during warm months.</p>
         <Toggle checked={bypass.enabled} onChange={(v) => setBypass({ ...bypass, enabled: v })} label="Enable summer mode schedule" />
@@ -503,12 +510,12 @@ function SchedulesTab({ airflow }: { airflow?: { reduced: number; normal: number
         </div>}
       </div>
 
-      <button onClick={handleSave}>Save All Schedules</button>
+      <button onClick={handleSave}>{t(lang).saveAllSchedules}</button>
     </>
   )
 }
 
-function SettingsTab() {
+function SettingsTab({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lang) => void }) {
   const [config, setConfig] = useState<Config | null>(null)
   const [msg, setMsg] = useState<{ type: string; text: string } | null>(null)
 
@@ -530,7 +537,18 @@ function SettingsTab() {
     <>
       {msg && <div class={`msg ${msg.type}`}>{msg.text}</div>}
       <div class="card">
-        <h3>WiFi</h3>
+        <h3>{t(lang).language}</h3>
+        <select value={config.language ?? 'en'} onChange={(e) => {
+          const newLang = (e.target as HTMLSelectElement).value as Lang
+          setConfig({ ...config, language: newLang })
+          onLangChange(newLang)
+        }}>
+          <option value="en">{t(lang).english}</option>
+          <option value="de">{t(lang).german}</option>
+        </select>
+      </div>
+      <div class="card">
+        <h3>{t(lang).wifi}</h3>
         <label>SSID</label>
         <input type="text" value={config.network.wifiSsid} onInput={(e) => update('network', 'wifiSsid', (e.target as HTMLInputElement).value)} />
         <label>Password</label>
@@ -560,7 +578,7 @@ function SettingsTab() {
         <label>Password</label>
         <input type="password" value={config.web.password} onInput={(e) => update('web', 'password', (e.target as HTMLInputElement).value)} />
       </div>
-      <button onClick={handleSave}>Save Settings</button>
+      <button onClick={handleSave}>{t(lang).saveSettings}</button>
 
       <div class="card" style="margin-top:16px">
         <h3>Backup & Restore</h3>
@@ -585,7 +603,7 @@ function SettingsTab() {
   )
 }
 
-function SystemTab({ status }: { status: Status | null }) {
+function SystemTab({ status, lang }: { status: Status | null; lang: Lang }) {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState('')
@@ -608,7 +626,7 @@ function SystemTab({ status }: { status: Status | null }) {
   return (
     <>
       {status && <div class="card">
-        <h3>System Info</h3>
+        <h3>{t(lang).systemInfo}</h3>
         <div class="stat"><span class="label">Version</span><span class="value">{status.system.version}</span></div>
         <div class="stat"><span class="label">Uptime</span><span class="value">{formatUptime(status.system.uptime)}</span></div>
         <div class="stat"><span class="label">Free heap</span><span class="value">{Math.round(status.system.freeHeap / 1024)} KB</span></div>
@@ -616,7 +634,7 @@ function SystemTab({ status }: { status: Status | null }) {
         <div class="stat"><span class="label">MQTT</span><span class={`value ${status.system.mqttConnected ? 'ok' : 'fault'}`}>{status.system.mqttConnected ? 'Connected' : 'Disconnected'}</span></div>
       </div>}
       <div class="card">
-        <h3>Firmware Update</h3>
+        <h3>{t(lang).firmwareUpdate}</h3>
         <input type="file" accept=".bin" onChange={(e) => setFile((e.target as HTMLInputElement).files?.[0] ?? null)} />
         <br /><br />
         <button onClick={handleUpload} disabled={!file || uploading}>{uploading ? 'Uploading...' : 'Upload Firmware'}</button>
@@ -631,6 +649,7 @@ export function App() {
   const [tab, setTab] = useState(0)
   const [status, setStatus] = useState<Status | null>(null)
   const [pendingAction, setPendingAction] = useState(false)
+  const [lang, setLang] = useState<Lang>('en')
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -649,6 +668,7 @@ export function App() {
 
   useEffect(() => {
     getStatus().then((s) => { setStatus(s); setAuthenticated(true) }).catch(() => {})
+    getConfig().then((c) => { if (c.language === 'de' || c.language === 'en') setLang(c.language) }).catch(() => {})
   }, [])
 
   if (!authenticated) return <LoginPage onLogin={() => setAuthenticated(true)} />
@@ -658,15 +678,15 @@ export function App() {
       <h1>Wolf CWL</h1>
       {status?.system.simulated && <div class="sim-banner">Simulation Mode</div>}
       <div class="tabs">
-        <div class={`tab ${tab === 0 ? 'active' : ''}`} onClick={() => setTab(0)}>Status</div>
-        <div class={`tab ${tab === 1 ? 'active' : ''}`} onClick={() => setTab(1)}>Schedules</div>
-        <div class={`tab ${tab === 2 ? 'active' : ''}`} onClick={() => setTab(2)}>Settings</div>
-        <div class={`tab ${tab === 3 ? 'active' : ''}`} onClick={() => setTab(3)}>System</div>
+        <div class={`tab ${tab === 0 ? 'active' : ''}`} onClick={() => setTab(0)}>{t(lang).status}</div>
+        <div class={`tab ${tab === 1 ? 'active' : ''}`} onClick={() => setTab(1)}>{t(lang).schedules}</div>
+        <div class={`tab ${tab === 2 ? 'active' : ''}`} onClick={() => setTab(2)}>{t(lang).settings}</div>
+        <div class={`tab ${tab === 3 ? 'active' : ''}`} onClick={() => setTab(3)}>{t(lang).system}</div>
       </div>
-      {tab === 0 && <StatusTab status={status} onLevelChange={async (level) => { setPendingAction(true); await setVentilationLevel(level) }} onCancelOff={async () => { await cancelTimedOff(); refreshStatus() }} onConfirmed={() => setPendingAction(false)} />}
-      {tab === 1 && <SchedulesTab airflow={status?.airflow} />}
-      {tab === 2 && <SettingsTab />}
-      {tab === 3 && <SystemTab status={status} />}
+      {tab === 0 && <StatusTab status={status} lang={lang} onLevelChange={async (level) => { setPendingAction(true); await setVentilationLevel(level) }} onCancelOff={async () => { await cancelTimedOff(); refreshStatus() }} onConfirmed={() => setPendingAction(false)} />}
+      {tab === 1 && <SchedulesTab airflow={status?.airflow} lang={lang} />}
+      {tab === 2 && <SettingsTab lang={lang} onLangChange={setLang} />}
+      {tab === 3 && <SystemTab status={status} lang={lang} />}
 
       <OledMirror />
 

@@ -11,6 +11,7 @@ use serde_json::json;
 
 use crate::app_state::AppStateInner;
 use crate::cwl_data::ventilation_level_name;
+use crate::i18n::Language;
 
 type AppState = Arc<Mutex<AppStateInner>>;
 type HandlerResult = Result<(), EspIOError>;
@@ -258,6 +259,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "encSw": c.enc_sw_pin,
             },
             "configured": c.configured,
+            "language": c.language.code(),
         });
         send_json_body(req, &body.to_string())
     })?;
@@ -308,6 +310,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 if let Some(v) = pins["encSw"].as_u64() { st.config.enc_sw_pin = v as u8; }
             }
             if let Some(v) = val["configured"].as_bool() { st.config.configured = v; }
+            if let Some(v) = val["language"].as_str() { st.config.language = Language::from_code(v); }
             info!("Config updated via POST /api/config");
             drop(st);
             return send_ok(req);
