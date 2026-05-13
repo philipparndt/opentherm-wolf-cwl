@@ -54,15 +54,27 @@ Additional signals from the ESP32-POE EXT1/EXT2 headers:
 
 ### Display
 
-| Ref | Component | Source | Description | Qty |
-|-----|-----------|--------|-------------|-----|
-| — | SH1106 1.3" OLED | AliExpress / Amazon | 128x64 I2C module, 4-pin | 1 |
+Two board variants exist, one per display module — they share everything except the J3 footprint and the 3D model.
+
+| Variant dir | Module | Board | Header | Pinout (pad 1 → 4) | KiCad footprint | 3D model |
+|-------------|--------|-------|--------|--------------------|-----------------|----------|
+| `cwl/` (default) | SH1106 0.96" OLED | 27.4 × 27.3 mm | top edge | GND, VCC, SCL, SDA | `SSD1306:128x64OLED-MountingHoles` | `3dmodels/OLED_SH1106_0.96inch.step` |
+| `cwl-1.3/` | SH1106 1.3" OLED | 35.6 × 33.8 mm | side (between mounting holes that sit further from the edge) | VDD, GND, SCK, SDA | `SSD1306:128x64OLED-MountingHoles-Large` | `3dmodels/OLED_SH1106_1.3inch.step` |
+
+Both modules come from AliExpress / Amazon as 128×64 I²C breakouts; pick a variant up front and build only the matching board. Outline / mounting holes for the 1.3" variant are also captured in `oled_1_3.scad` for case design.
+
+Build either variant by passing `VARIANT=` to the Makefile, e.g.:
+
+```
+make gerber              # builds cwl/ (default 0.96")
+make gerber VARIANT=cwl-1.3
+```
 
 ### Encoder
 
 | Ref | Component | Mouser # | Manufacturer | Description | Qty |
 |-----|-----------|----------|--------------|-------------|-----|
-| SW1 | EC12E24204A9 | 688-EC12E24204A9 | Alps Alpine | 24 detents, push switch, 20mm D-shaft | 1 |
+| SW1 | EC12E2424407 | — | Alps Alpine | 24 detents, **with push switch**, 20mm D-shaft (⚠️ EC12E24204A9 has NO switch!) | 1 |
 
 ### Status LED
 
@@ -130,7 +142,7 @@ EC12E24204A9:
 | J1 | Connector_Generic:Conn_02x05_Odd_Even | Connector_IDC:IDC-Header_2x05_P2.54mm_Vertical |
 | J2 | Connector:Screw_Terminal_01x02 | TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal |
 | J3 | Connector_Generic:Conn_01x04 | Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical |
-| U1, U2 | Isolator:EL817 | Package_SO:SOP-4_3.8x4.1mm_P2.54mm |
+| U1, U2 | Isolator:EL817 | Package_SO:SOP-4_7.5x4.1mm_P2.54mm |
 | Q1 | Transistor_FET:2N7002 | Package_TO_SOT_SMD:SOT-23 |
 | D1 | Diode:BZX384-C3V3 | Diode_SMD:D_SOD-323 |
 | D2, D3 | Diode:1N4148W | Diode_SMD:D_SOD-323 |
@@ -140,9 +152,9 @@ EC12E24204A9:
 
 **Notes:**
 - **J1 footprint**: The Hirose HIF3FB is a specific keyed connector — check Hirose's KiCad library or use the generic IDC footprint and verify pin spacing against the datasheet.
-- **U1/U2 footprint**: The LTV-817S SOP-4 package has 2.54mm pin pitch (not standard SOP 1.27mm). Use `Package_SO:SOP-4_3.8x4.1mm_P2.54mm` or verify against the LTV-817S datasheet.
+- **U1/U2 footprint**: LTV-817S-B is the long-creepage SOP-4 — body 7.5 × 4.1 mm, 2.54 mm pitch, pad rows centred ±4.6875 mm (outer-to-outer lead span ~9.1 mm). Use `Package_SO:SOP-4_7.5x4.1mm_P2.54mm`. ⚠️ Boards manufactured before 2026-05-12 used the smaller `SOP-4_3.8x4.1mm` footprint by mistake — the LTV-817S leads land ~2.5 mm short of the pads on those boards. Re-import the netlist and re-route U1/U2 before re-ordering.
 - **SW1 footprint**: The Alps EC12E has a specific 5-pin footprint (3 encoder + 2 switch). The KiCad library includes `RotaryEncoder_Alps_EC12E_Vertical_H20mm` for the 20mm shaft variant.
-- **J3 footprint**: Match the pin spacing of your OLED module (typically 2.54mm, 4 pins in a row: GND, VCC, SCL, SDA).
+- **J3 footprint**: Match the pin spacing of your OLED module (2.54mm, 4 pins). The pinout differs per variant — the 0.96" board is GND/VCC/SCL/SDA, the 1.3" board is VDD/GND/SCK/SDA — so swapping a module across variants requires re-routing, not just refitting.
 
 ## PCB Design Notes
 

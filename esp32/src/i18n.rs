@@ -32,6 +32,8 @@ impl Language {
 pub struct Strings {
     // Page headers
     pub ventilation: &'static str,
+    pub scheduled: &'static str,
+    pub manual: &'static str,
     pub set_level: &'static str,
     pub off_duration: &'static str,
     pub summer_mode: &'static str,
@@ -104,6 +106,8 @@ pub struct Strings {
 
 pub const EN: Strings = Strings {
     ventilation: "Ventilation",
+    scheduled: "Scheduled",
+    manual: "Manual",
     set_level: "Set Level",
     off_duration: "Off Duration",
     summer_mode: "Summer Mode",
@@ -166,6 +170,8 @@ pub const EN: Strings = Strings {
 
 pub const DE: Strings = Strings {
     ventilation: "L\u{fc}ftung",
+    scheduled: "Zeitplan",
+    manual: "Manuell",
     set_level: "Stufe",
     off_duration: "Aus-Dauer",
     summer_mode: "Sommermodus",

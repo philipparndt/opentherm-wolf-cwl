@@ -40,7 +40,7 @@ generate_schematic = SchLib(tool=SKIDL).add_parts(*[
         Part(**{ 'name':'R', 'dest':TEMPLATE, 'tool':SKIDL, 'aliases':Alias({'R'}), 'ref_prefix':'U', 'fplist':None, 'footprint':'Resistor_SMD:R_0603_1608Metric', 'keywords':None, 'description':'', 'datasheet':None, 'pins':[
             Pin(num='1',name='1',func=pin_types.PASSIVE),
             Pin(num='2',name='2',func=pin_types.PASSIVE)] }),
-        Part(**{ 'name':'LTV-817S', 'dest':TEMPLATE, 'tool':SKIDL, 'aliases':Alias({'LTV-817S'}), 'ref_prefix':'U', 'fplist':None, 'footprint':'Package_SO:SOP-4_3.8x4.1mm_P2.54mm', 'keywords':None, 'description':'', 'datasheet':None, 'pins':[
+        Part(**{ 'name':'LTV-817S', 'dest':TEMPLATE, 'tool':SKIDL, 'aliases':Alias({'LTV-817S'}), 'ref_prefix':'U', 'fplist':None, 'footprint':'Package_SO:SOP-4_7.5x4.1mm_P2.54mm', 'keywords':None, 'description':'', 'datasheet':None, 'pins':[
             Pin(num='1',name='A',func=pin_types.PASSIVE),
             Pin(num='2',name='K',func=pin_types.PASSIVE),
             Pin(num='3',name='E',func=pin_types.PASSIVE),

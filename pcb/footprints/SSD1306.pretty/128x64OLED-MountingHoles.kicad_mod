@@ -28,7 +28,7 @@
   (pad "2" thru_hole oval (at 12.32 1.7 90) (size 2 1.6) (drill 1) (layers *.Cu *.Mask) (tstamp 632acde9-b7fd-4f04-8cb4-d2cbb06b3595))
   (pad "3" thru_hole oval (at 14.86 1.7 90) (size 2 1.6) (drill 1) (layers *.Cu *.Mask) (tstamp 1b54105e-6590-4d26-a763-ecfcf81eedc4))
   (pad "4" thru_hole oval (at 17.4 1.7 90) (size 2 1.6) (drill 1) (layers *.Cu *.Mask) (tstamp afd3dbad-e7a8-4e4c-b77c-4065a69aefa2))
-  (model "${KIPRJMOD}/../3dmodels/OLED_SH1106_1.3inch.step"
+  (model "${KIPRJMOD}/../3dmodels/OLED_SH1106_0.96inch.step"
     (offset (xyz 0 0 0))
     (scale (xyz 1 1 1))
     (rotate (xyz 0 0 0))

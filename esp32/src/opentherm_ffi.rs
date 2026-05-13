@@ -91,15 +91,6 @@ impl OpenTherm {
         }
     }
 
-    /// Extract data ID from a frame.
-    pub fn get_data_id(frame: u32) -> u8 {
-        unsafe { ffi::ot_get_data_id(frame) as u8 }
-    }
-
-    /// Extract 16-bit data value from a frame.
-    pub fn get_data_value(frame: u32) -> u16 {
-        unsafe { ffi::ot_get_data_value(frame) }
-    }
 }
 
 impl Drop for OpenTherm {

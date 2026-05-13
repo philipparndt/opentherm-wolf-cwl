@@ -22,6 +22,24 @@ impl FrameBuffer {
         self.buf.fill(0);
     }
 
+    /// Iterate every pixel in scan-line order as `embedded_graphics` `Pixel`s.
+    /// Used to blit the rendered framebuffer onto an OLED `DrawTarget` so we
+    /// can render the screen exactly once per frame (avoiding the previous
+    /// double-render of fb + OLED that dominated `disp.update` cost).
+    pub fn pixels(&self) -> impl Iterator<Item = Pixel<BinaryColor>> + '_ {
+        let buf = &self.buf;
+        (0..HEIGHT).flat_map(move |y| {
+            let page = y / 8;
+            let bit = y % 8;
+            (0..WIDTH).map(move |x| {
+                let idx = page * WIDTH + x;
+                let on = (buf[idx] >> bit) & 1 == 1;
+                let color = if on { BinaryColor::On } else { BinaryColor::Off };
+                Pixel(Point::new(x as i32, y as i32), color)
+            })
+        })
+    }
+
     /// Set a pixel. Layout: 8 pages of 128 columns, each byte is 8 vertical pixels.
     fn set_pixel(&mut self, x: usize, y: usize, on: bool) {
         if x >= WIDTH || y >= HEIGHT { return; }

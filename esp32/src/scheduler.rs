@@ -29,7 +29,7 @@ pub struct ScheduleEntry {
     pub active_days: u8, // bitmask: bit0=Mon..bit6=Sun
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BypassSchedule {
     pub enabled: bool,
     #[serde(rename = "startDay")]
@@ -40,6 +40,18 @@ pub struct BypassSchedule {
     pub end_day: u8,
     #[serde(rename = "endMonth")]
     pub end_month: u8,
+}
+
+impl Default for BypassSchedule {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            start_day: 1,
+            start_month: 4,
+            end_day: 15,
+            end_month: 9,
+        }
+    }
 }
 
 pub struct Scheduler {
@@ -58,7 +70,7 @@ impl Scheduler {
             state,
             schedules: Vec::new(),
             bypass_schedule: BypassSchedule::default(),
-            last_eval_ms: 0,
+            last_eval_ms: u32::MAX - EVAL_INTERVAL_MS, // ensure first eval runs immediately
             last_active_index: -1,
             timed_off_active: false,
             timed_off_end_epoch: 0,
@@ -195,8 +207,6 @@ impl Scheduler {
         self.timed_off_active = false;
         self.timed_off_end_epoch = 0;
         let mut st = self.state.lock().unwrap();
-        st.requested_vent_level = 2; // Normal
-        st.schedule_override = false;
         st.timed_off_end_epoch = 0;
         st.persist_timed_off = true;
         info!("Scheduler: Timed off cancelled");

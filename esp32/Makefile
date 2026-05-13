@@ -3,7 +3,7 @@
 
 # Configuration
 PORT ?= /dev/cu.wchusbserial8310
-FEATURES ?= ethernet,simulate-ot,ot-uext
+FEATURES ?= ethernet,simulate-ot,ot-uext,display-sh1106
 
 # Paths
 WEB_SRC := web
@@ -20,12 +20,13 @@ CYAN := \033[36m
 GREEN := \033[32m
 NC := \033[0m
 
-.PHONY: build flash monitor flash-monitor dev build-web build-fs flash-fs flash-all clean help
+.PHONY: build flash monitor flash-monitor dev prod build-web build-fs flash-fs flash-all clean help
 
 help:
 	@echo "$(CYAN)Wolf CWL Rust Firmware$(NC)"
 	@echo ""
 	@echo "  make dev            - Build, flash and monitor (simulation mode)"
+	@echo "  make prod           - Build, flash and monitor (real OpenTherm, no simulation)"
 	@echo "  make build          - Build firmware"
 	@echo "  make flash          - Build and flash firmware via USB"
 	@echo "  make monitor        - Open serial monitor"
@@ -55,6 +56,9 @@ flash-monitor: build
 	espflash flash --monitor -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
 
 dev: flash-monitor
+
+prod:
+	$(MAKE) flash-monitor FEATURES="ethernet,ot-uext,display-sh1106"
 
 # First-time setup: flash with partition table (erases NVS!)
 flash-init: build

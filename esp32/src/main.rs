@@ -23,6 +23,53 @@ use esp_idf_svc::hal::prelude::*;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use log::info;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Consume any pending encoder events, applying each to the display and
+/// rendering between events so a fast spin shows every page. Called both
+/// from the body of the main loop and from inside the sleep window so
+/// rotation feels responsive without changing the main-loop cadence for
+/// the rest of the work.
+fn drain_encoder(
+    enc: &mut Option<encoder::Encoder>,
+    disp: &mut display::Display,
+    now_ms: u32,
+) {
+    let Some(enc) = enc.as_mut() else { return };
+    let start_us = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
+    let mut count = 0u32;
+    while let Some(event) = enc.poll(now_ms) {
+        match event {
+            encoder::EncoderEvent::Rotate(delta) => {
+                if !disp.wake() {
+                    if disp.edit_mode {
+                        disp.adjust_edit_value(delta);
+                    } else if delta > 0 {
+                        disp.next_page();
+                    } else {
+                        disp.prev_page();
+                    }
+                }
+            }
+            encoder::EncoderEvent::Press => {
+                if !disp.wake() {
+                    if disp.edit_mode {
+                        disp.exit_edit_mode(true); // apply
+                    } else {
+                        disp.enter_edit_mode();
+                    }
+                }
+            }
+        }
+        disp.update(now_ms);
+        count += 1;
+    }
+    if count > 0 {
+        let total_us = unsafe { esp_idf_svc::sys::esp_timer_get_time() } - start_us;
+        info!("DRAIN events={} total={}us", count, total_us);
+    }
+}
 
 fn main() {
     esp_idf_svc::log::EspLogger::initialize_default();
@@ -41,7 +88,11 @@ fn main() {
     FreeRtos::delay_ms(200);
 
     // I2C for display
-    let i2c_config = I2cConfig::new().baudrate(400.kHz().into());
+    // 1 MHz brings the OLED flush down from ~32 ms (400 kHz, spec default) to
+    // ~13 ms — the dominant cost of disp.update(). SSD1306 and SH1106 panels
+    // routinely tolerate this on short, well-pulled-up buses; if the panel
+    // ever shimmers or shows corruption, back this off to 400/800 kHz.
+    let i2c_config = I2cConfig::new().baudrate(1.MHz().into());
     let i2c = I2cDriver::new(
         peripherals.i2c0,
         peripherals.pins.gpio13, // SDA
@@ -92,13 +143,20 @@ fn main() {
     }
 
     // Display + boot screen
-    let mut disp = display::Display::new(i2c, state.clone());
+    // Shared dirty flag — anything that mutates display-visible state (the
+    // Display struct's own setters, plus background threads that touch
+    // AppState) bumps it; Display::update() short-circuits when it's clear.
+    let display_dirty: display::DisplayDirty = Arc::new(AtomicBool::new(true));
+    let mut disp = display::Display::new(i2c, state.clone(), display_dirty.clone());
     disp.boot_screen();
 
-    // Network setup
+    // Network setup — non-blocking. The driver starts in the background; the
+    // main loop polls check_network_connected() and reacts (display, NTP)
+    // when (and if) the link comes up. Without this, an unplugged cable
+    // would block boot until wait_netif_up() times out.
     #[cfg(feature = "ethernet")]
     {
-        let net = network::eth_impl::start_ethernet(
+        match network::eth_impl::start_ethernet(
             peripherals.mac,
             peripherals.pins.gpio0,
             peripherals.pins.gpio12,
@@ -112,45 +170,30 @@ fn main() {
             peripherals.pins.gpio26,
             peripherals.pins.gpio27,
             sysloop.clone(),
-        ).unwrap();
-
-        {
-            let mut st = state.lock().unwrap();
-            st.network_connected = net.connected;
-            st.ip_address = net.ip_address.clone();
+        ) {
+            Ok(_) => info!("Network: ETH driver started (no link yet)"),
+            Err(e) => info!("Network: ETH init failed ({}), continuing offline", e),
         }
-        if net.connected {
-            if let Some(ref ip) = net.ip_address {
-                disp.show_ip(ip);
-            }
-            network::setup_ntp();
-            network::setup_mdns().ok();
-        }
-        info!("Network: connected={}, ip={}", net.connected,
-              net.ip_address.as_deref().unwrap_or("none"));
     }
 
     #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
     {
         use network::wifi_impl::WifiNetwork;
-        let mut wifi = WifiNetwork::new(peripherals.modem, sysloop.clone(), nvs_partition.clone()).unwrap();
-        wifi.connect(&config.wifi_ssid, &config.wifi_password).ok();
-        let connected = wifi.state.connected;
-        {
-            let mut st = state.lock().unwrap();
-            st.network_connected = connected;
-            st.ip_address = wifi.state.ip_address.clone();
-        }
-        if connected {
-            if let Some(ref ip) = wifi.state.ip_address {
-                disp.show_ip(ip);
+        match WifiNetwork::new(peripherals.modem, sysloop.clone(), nvs_partition.clone()) {
+            Ok(mut wifi) => {
+                wifi.connect(&config.wifi_ssid, &config.wifi_password).ok();
+                let connected = wifi.state.connected;
+                if connected {
+                    let mut st = state.lock().unwrap();
+                    st.network_connected = connected;
+                    st.ip_address = wifi.state.ip_address.clone();
+                }
+                info!("Network: WiFi connected={}, ip={}", connected,
+                      wifi.state.ip_address.as_deref().unwrap_or("none"));
+                std::mem::forget(wifi);
             }
-            network::setup_ntp();
-            network::setup_mdns().ok();
+            Err(e) => info!("Network: WiFi init failed ({}), continuing offline", e),
         }
-        info!("Network: connected={}, ip={}", connected,
-              wifi.state.ip_address.as_deref().unwrap_or("none"));
-        std::mem::forget(wifi);
     }
 
     // Mount SPIFFS filesystem for web UI
@@ -177,15 +220,59 @@ fn main() {
         peripherals.pins.gpio5.into(),
     ).ok();
 
-    // MQTT
-    let mut mqtt_mgr = mqtt::MqttManager::new(state.clone());
-    if let Some(ref mut mgr) = mqtt_mgr {
-        mgr.setup_subscriptions();
+    // MQTT also runs on its own thread — publish bursts (~25 topics over the
+    // network) can take 50–200 ms and we don't want that anywhere near the
+    // encoder/display path. Incoming-command callbacks fire on EspMqttClient's
+    // internal event-loop thread, independently of this one.
+    {
+        let state = state.clone();
+        std::thread::Builder::new()
+            .name("mqtt".into())
+            .stack_size(8192)
+            .spawn(move || {
+                let mut mqtt_mgr = match mqtt::MqttManager::new(state) {
+                    Some(m) => m,
+                    None => return, // disabled / not configured
+                };
+                mqtt_mgr.setup_subscriptions();
+                loop {
+                    let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
+                    mqtt_mgr.update(now_ms);
+                    FreeRtos::delay_ms(100);
+                }
+            })
+            .expect("Failed to spawn MQTT thread");
     }
 
     // OpenTherm master
-    let mut ot = ot_master::OtMaster::new(state.clone(), ot_in, ot_out)
-        .expect("Failed to init OpenTherm");
+    // OpenTherm runs on its own thread so its blocking I/O (up to ~1 s per
+    // request with a real, unresponsive slave) doesn't stall the main loop's
+    // UI / encoder / display work.
+    {
+        let state = state.clone();
+        let display_dirty = display_dirty.clone();
+        std::thread::Builder::new()
+            .name("ot".into())
+            .stack_size(8192)
+            .spawn(move || {
+                let mut ot = ot_master::OtMaster::new(state, ot_in, ot_out)
+                    .expect("Failed to init OpenTherm");
+                loop {
+                    let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
+                    // update() returns true when it actually ran a poll step
+                    // (~1 Hz). Only then might cwl_data have changed, so we
+                    // only flip the dirty flag at that cadence.
+                    if ot.update(now_ms) {
+                        display_dirty.store(true, Ordering::Relaxed);
+                    }
+                    // ot.update() throttles itself to POLL_INTERVAL_MS (1 s).
+                    // Sleep short enough that timed_off_request / vent level
+                    // changes get serviced on the next tick.
+                    FreeRtos::delay_ms(100);
+                }
+            })
+            .expect("Failed to spawn OT thread");
+    }
 
     // Scheduler
     let mut sched = scheduler::Scheduler::new(state.clone());
@@ -214,12 +301,12 @@ fn main() {
     let mut last_net_connected = state.lock().unwrap().network_connected;
     let mut last_net_check_ms: u32 = 0;
     const NET_CHECK_INTERVAL_MS: u32 = 2000;
+    let mut ntp_initialized = false;
 
     loop {
         let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
 
-        // OpenTherm polling
-        ot.update(now_ms);
+        // OpenTherm polling now runs on its own thread (spawned above).
 
         // Timed off requests from web/MQTT
         {
@@ -265,10 +352,7 @@ fn main() {
             }
         }
 
-        // MQTT publishing
-        if let Some(ref mut mgr) = mqtt_mgr {
-            mgr.update(now_ms);
-        }
+        // MQTT publishing now runs on its own thread (spawned above).
 
         // Watchdog
         {
@@ -332,6 +416,11 @@ fn main() {
                         info!("Network: Connected, IP: {}", ip);
                         disp.show_ip(ip);
                     }
+                    if !ntp_initialized {
+                        ntp_initialized = true;
+                        network::setup_ntp();
+                        network::setup_mdns().ok();
+                    }
                 } else {
                     info!("Network: Disconnected");
                     disp.show_disconnected();
@@ -340,32 +429,7 @@ fn main() {
         }
 
         // Encoder input
-        if let Some(ref mut enc) = enc {
-            if let Some(event) = enc.poll(now_ms) {
-                match event {
-                    encoder::EncoderEvent::Rotate(delta) => {
-                        if !disp.wake() {
-                            if disp.edit_mode {
-                                disp.adjust_edit_value(delta);
-                            } else if delta > 0 {
-                                disp.next_page();
-                            } else {
-                                disp.prev_page();
-                            }
-                        }
-                    }
-                    encoder::EncoderEvent::Press => {
-                        if !disp.wake() {
-                            if disp.edit_mode {
-                                disp.exit_edit_mode(true); // apply
-                            } else {
-                                disp.enter_edit_mode();
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        drain_encoder(&mut enc, &mut disp, now_ms);
 
         // Factory reset — encoder long-hold (10s)
         if let Some(ref enc) = enc {
@@ -380,6 +444,14 @@ fn main() {
         // Display update
         disp.update(now_ms);
 
-        FreeRtos::delay_ms(50);
+        // Idle window — broken into short slices so encoder events get
+        // serviced within ~10 ms instead of waiting for the next full
+        // iteration (~80 ms). The encoder poll itself is a single atomic
+        // read, so this loop is effectively free.
+        for _ in 0..10 {
+            FreeRtos::delay_ms(5);
+            let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
+            drain_encoder(&mut enc, &mut disp, now_ms);
+        }
     }
 }

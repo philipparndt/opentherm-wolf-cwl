@@ -30,7 +30,7 @@ def R(ref, value):
 
 def OPTO(ref, value):
     return Part(tool=SKIDL, name="LTV-817S", ref=ref, value=value,
-                footprint="Package_SO:SOP-4_3.8x4.1mm_P2.54mm",
+                footprint="Package_SO:SOP-4_7.5x4.1mm_P2.54mm",
                 pins=[Pin(num="1", name="A", func=Pin.types.PASSIVE),
                       Pin(num="2", name="K", func=Pin.types.PASSIVE),
                       Pin(num="3", name="E", func=Pin.types.PASSIVE),

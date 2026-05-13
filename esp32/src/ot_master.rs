@@ -75,20 +75,26 @@ impl OtMaster {
         })
     }
 
-    pub fn update(&mut self, now_ms: u32) {
+    /// Run one poll/simulate step. Returns `true` if a step was actually
+    /// executed this call (used by the OT thread to bump the display dirty
+    /// flag only when something might have changed, instead of every 100 ms).
+    pub fn update(&mut self, now_ms: u32) -> bool {
         if now_ms.wrapping_sub(self.last_poll_ms) < POLL_INTERVAL_MS {
-            return;
+            return false;
         }
         self.last_poll_ms = now_ms;
 
         #[cfg(feature = "simulate-ot")]
         {
             self.simulate(now_ms);
-            return;
+            return true;
         }
 
         #[cfg(not(feature = "simulate-ot"))]
-        self.poll_cycle(now_ms);
+        {
+            self.poll_cycle(now_ms);
+            true
+        }
     }
 
     #[cfg(not(feature = "simulate-ot"))]
@@ -104,7 +110,7 @@ impl OtMaster {
             }
         }
 
-        let mut st = self.state.lock().unwrap();
+        let st = self.state.lock().unwrap();
 
         let (request, process_fn): (u32, Box<dyn FnOnce(u32, &mut AppStateInner)>) = match self.poll_state {
             PollState::MasterConfig => {

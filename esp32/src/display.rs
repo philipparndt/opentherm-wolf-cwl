@@ -1,16 +1,19 @@
-//! OLED display — 128x64 I2C, SSD1306 driver (compatible with SH1106), 6 pages with overlays.
+//! OLED display — 128x64 I2C, 7 pages with overlays.
+//!
+//! Driver selection is at compile time:
+//!   * default (0.96" panels): SSD1306
+//!   * `display-sh1106` feature (1.3" panels): SH1106
+//! The two controllers share the same protocol surface but differ enough in
+//! column offset and addressing-mode handling that mixing them produces noise.
 
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Circle, Line, PrimitiveStyle};
 use esp_idf_svc::hal::i2c::I2cDriver;
 use log::info;
-use ssd1306::mode::BufferedGraphicsMode;
-use ssd1306::prelude::*;
-use ssd1306::I2CDisplayInterface;
-use ssd1306::Ssd1306;
 use u8g2_fonts::fonts;
 use u8g2_fonts::FontRenderer;
 use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
@@ -19,8 +22,34 @@ use crate::app_state::AppStateInner;
 use crate::framebuffer::FrameBuffer;
 use crate::i18n::{Language, tr, level_name};
 
+#[cfg(not(feature = "display-sh1106"))]
+use ssd1306::mode::BufferedGraphicsMode;
+#[cfg(not(feature = "display-sh1106"))]
+use ssd1306::prelude::*;
+#[cfg(not(feature = "display-sh1106"))]
+use ssd1306::{I2CDisplayInterface, Ssd1306};
+
+#[cfg(feature = "display-sh1106")]
+use sh1106::{prelude::*, Builder};
+
 type AppState = Arc<Mutex<AppStateInner>>;
+
+#[cfg(not(feature = "display-sh1106"))]
 type Disp = Ssd1306<I2CInterface<I2cDriver<'static>>, DisplaySize128x64, BufferedGraphicsMode<DisplaySize128x64>>;
+
+#[cfg(feature = "display-sh1106")]
+type Disp = GraphicsMode<I2cInterface<I2cDriver<'static>>>;
+
+/// Clear the off-screen buffer. The two driver crates spell this differently
+/// (`clear_buffer` on ssd1306, `clear` on sh1106 0.5) — wrap it once here so
+/// the call sites stay clean.
+#[inline]
+fn clear_disp(d: &mut Disp) {
+    #[cfg(not(feature = "display-sh1106"))]
+    { d.clear_buffer(); }
+    #[cfg(feature = "display-sh1106")]
+    { d.clear(); }
+}
 
 pub const PAGE_COUNT: usize = 7;
 const STANDBY_TIMEOUT_MS: u32 = 300_000;
@@ -44,6 +73,15 @@ impl Page {
     fn index(self) -> usize { self as usize }
 }
 
+/// Shared flag that gates whether `Display::update()` actually re-renders.
+/// Set whenever something that affects the on-screen content changes — either
+/// internally (page change, edit mode, overlay) or from another thread that
+/// has touched `AppState` (OT sensor updates, MQTT commands). This is the
+/// only way an external thread can request a render; cloning + bumping this
+/// flag is far cheaper than locking the AppState mutex and is the reason we
+/// no longer re-render ~7×/s when nothing has changed.
+pub type DisplayDirty = Arc<AtomicBool>;
+
 pub struct Display {
     display: Option<Disp>,
     fb: FrameBuffer,
@@ -60,26 +98,45 @@ pub struct Display {
     overlay_message: String,
     overlay_start_ms: u32,
     edit_mode_start_ms: u32,
+    dirty: DisplayDirty,
 }
 
 impl Display {
-    pub fn new(i2c: I2cDriver<'static>, state: AppState) -> Self {
-        let interface = I2CDisplayInterface::new(i2c);
-        let rotation = if cfg!(feature = "display-rotate") {
-            DisplayRotation::Rotate180
-        } else {
-            DisplayRotation::Rotate0
+    pub fn new(i2c: I2cDriver<'static>, state: AppState, dirty: DisplayDirty) -> Self {
+        #[cfg(not(feature = "display-sh1106"))]
+        let mut display = {
+            let interface = I2CDisplayInterface::new(i2c);
+            let rotation = if cfg!(feature = "display-rotate") {
+                DisplayRotation::Rotate180
+            } else {
+                DisplayRotation::Rotate0
+            };
+            Ssd1306::new(interface, DisplaySize128x64, rotation)
+                .into_buffered_graphics_mode()
         };
-        let mut display = Ssd1306::new(interface, DisplaySize128x64, rotation)
-            .into_buffered_graphics_mode();
 
+        #[cfg(feature = "display-sh1106")]
+        let mut display: Disp = {
+            let rotation = if cfg!(feature = "display-rotate") {
+                DisplayRotation::Rotate180
+            } else {
+                DisplayRotation::Rotate0
+            };
+            Builder::new()
+                .with_size(DisplaySize::Display128x64)
+                .with_rotation(rotation)
+                .connect_i2c(i2c)
+                .into()
+        };
+
+        let driver_name = if cfg!(feature = "display-sh1106") { "SH1106" } else { "SSD1306" };
         let mut ok = false;
         for attempt in 1..=3 {
             if display.init().is_ok() {
-                display.clear_buffer();
+                clear_disp(&mut display);
                 display.flush().ok();
                 ok = true;
-                info!("Display: Initialized (SSD1306/SH1106, attempt {})", attempt);
+                info!("Display: Initialized ({}, attempt {})", driver_name, attempt);
                 break;
             }
             info!("Display: Init attempt {} failed, retrying...", attempt);
@@ -88,6 +145,8 @@ impl Display {
         if !ok {
             info!("Display: Init failed after 3 attempts");
         }
+        // Force one render on startup so the boot/home screen actually paints.
+        dirty.store(true, Ordering::Relaxed);
         Self {
             display: if ok { Some(display) } else { None },
             fb: FrameBuffer::new(),
@@ -95,7 +154,15 @@ impl Display {
             edit_off_duration: false, edit_off_hours: 1, standby: false,
             last_activity_ms: now(), overlay_active: false, overlay_header: String::new(),
             overlay_message: String::new(), overlay_start_ms: 0, edit_mode_start_ms: 0,
+            dirty,
         }
+    }
+
+    /// Mark the screen as needing a re-render. Internal mutations call this
+    /// directly; external threads instead bump their clone of the shared
+    /// `DisplayDirty` flag.
+    fn mark_dirty(&self) {
+        self.dirty.store(true, Ordering::Relaxed);
     }
 
     pub fn update(&mut self, _now_ms: u32) {
@@ -103,57 +170,44 @@ impl Display {
 
         if self.edit_mode && now_ms.wrapping_sub(self.edit_mode_start_ms) > EDIT_TIMEOUT_MS {
             self.edit_mode = false;
+            self.mark_dirty();
         }
 
         if let Some(ref mut display) = self.display {
             if !self.standby && !self.edit_mode
                 && now_ms.saturating_sub(self.last_activity_ms) > STANDBY_TIMEOUT_MS {
                 // Turn off display by clearing and flushing a blank screen
-                display.clear_buffer();
+                clear_disp(display);
                 display.flush().ok();
                 self.standby = true;
                 self.fb.clear();
                 self.state.lock().unwrap().display_framebuffer = self.fb.buf;
+                self.dirty.store(false, Ordering::Relaxed);
                 return;
             }
             if self.standby && self.overlay_active {
                 self.standby = false;
-                // Display will be redrawn on next frame
+                self.mark_dirty();
             }
         }
 
         if self.standby { return; }
         if self.overlay_active && now_ms.wrapping_sub(self.overlay_start_ms) > OVERLAY_TIMEOUT_MS {
             self.overlay_active = false;
+            self.mark_dirty();
         }
 
-        // Draw directly to OLED (single render, fast)
-        let display = match &mut self.display {
-            Some(d) => d,
-            None => {
-                // No OLED — draw to framebuffer only (for web mirror)
-                self.fb.clear();
-                {
-                    let st = self.state.lock().unwrap();
-                    Self::render_content(&mut self.fb, &st, self.current_page, self.edit_mode,
-                        self.edit_vent_level, self.edit_off_duration, self.edit_off_hours,
-                        self.overlay_active, &self.overlay_header, &self.overlay_message);
-                }
-                self.state.lock().unwrap().display_framebuffer = self.fb.buf;
-                return;
-            }
-        };
-
-        display.clear_buffer();
-        {
-            let st = self.state.lock().unwrap();
-            Self::render_content(display, &st, self.current_page, self.edit_mode,
-                self.edit_vent_level, self.edit_off_duration, self.edit_off_hours,
-                self.overlay_active, &self.overlay_header, &self.overlay_message);
+        // Skip the render path entirely if nothing has changed. The standby /
+        // overlay / edit-mode timeout checks above still run on every call so
+        // they remain time-driven even while we're idle.
+        if !self.dirty.swap(false, Ordering::Relaxed) {
+            return;
         }
-        display.flush().ok();
 
-        // Update web mirror framebuffer every frame (just a memcpy — fast)
+        // Render once into the framebuffer (the source of truth for both the
+        // OLED and the web mirror). Times every pass so we can see whether
+        // rendering or the I²C flush dominates.
+        let t_render_start = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
         self.fb.clear();
         {
             let st = self.state.lock().unwrap();
@@ -161,7 +215,34 @@ impl Display {
                 self.edit_vent_level, self.edit_off_duration, self.edit_off_hours,
                 self.overlay_active, &self.overlay_header, &self.overlay_message);
         }
+        let t_after_render = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
+
+        // Push the rendered framebuffer to the OLED. `draw_iter` yields every
+        // pixel (on + off) so we don't need a separate `clear_disp` first.
+        let mut t_after_blit = t_after_render;
+        let mut t_after_flush = t_after_render;
+        if let Some(ref mut d) = self.display {
+            let _ = d.draw_iter(self.fb.pixels());
+            t_after_blit = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
+            d.flush().ok();
+            t_after_flush = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
+        }
+
+        // Publish framebuffer for the web mirror (memcpy of 1 KB).
         self.state.lock().unwrap().display_framebuffer = self.fb.buf;
+        let t_done = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
+
+        let render_us = t_after_render - t_render_start;
+        let blit_us = t_after_blit - t_after_render;
+        let flush_us = t_after_flush - t_after_blit;
+        let publish_us = t_done - t_after_flush;
+        let total_us = t_done - t_render_start;
+        if total_us > 5_000 {
+            info!(
+                "DISP total={}us render={}us blit={}us flush={}us publish={}us",
+                total_us, render_us, blit_us, flush_us, publish_us
+            );
+        }
     }
 
     fn render_content(
@@ -248,10 +329,13 @@ impl Display {
 
     pub fn wake(&mut self) -> bool {
         self.last_activity_ms = now();
-        self.overlay_active = false;
+        if self.overlay_active {
+            self.overlay_active = false;
+            self.mark_dirty();
+        }
         if self.standby {
             self.standby = false;
-            // Next update() call will redraw the display
+            self.mark_dirty();
             return true;
         }
         false
@@ -264,6 +348,7 @@ impl Display {
         self.overlay_start_ms = now();
         self.overlay_active = true;
         self.last_activity_ms = self.overlay_start_ms;
+        self.mark_dirty();
     }
 
     pub fn show_disconnected(&mut self) {
@@ -274,22 +359,31 @@ impl Display {
         self.overlay_start_ms = now();
         self.overlay_active = true;
         self.last_activity_ms = self.overlay_start_ms;
+        self.mark_dirty();
     }
 
     pub fn next_page(&mut self) {
-        self.current_page = Page::from_index(self.current_page.index() + 1);
         self.last_activity_ms = now();
+        let next = self.current_page.index() + 1;
+        if next < PAGE_COUNT {
+            self.current_page = Page::from_index(next);
+            self.mark_dirty();
+        }
     }
     pub fn prev_page(&mut self) {
-        self.current_page = Page::from_index(self.current_page.index() + PAGE_COUNT - 1);
         self.last_activity_ms = now();
+        let curr = self.current_page.index();
+        if curr > 0 {
+            self.current_page = Page::from_index(curr - 1);
+            self.mark_dirty();
+        }
     }
 
     /// Show boot screen
     pub fn boot_screen(&mut self) {
         let display = match &mut self.display { Some(d) => d, None => return };
         let lang = self.state.lock().unwrap().config.language;
-        display.clear_buffer();
+        clear_disp(display);
         FONT_LARGE.render_aligned("Wolf CWL", Point::new(64, 20),
             VerticalPosition::Top, HorizontalAlignment::Center,
             FontColor::Transparent(BinaryColor::On), display).ok();
@@ -309,18 +403,21 @@ impl Display {
             self.edit_off_hours = 1;
             self.edit_mode = true;
             self.edit_mode_start_ms = now();
+            self.mark_dirty();
         } else if self.current_page == Page::Bypass {
             let st = self.state.lock().unwrap();
             self.edit_vent_level = if st.requested_bypass_open { 1 } else { 0 };
             drop(st);
             self.edit_mode = true;
             self.edit_mode_start_ms = now();
+            self.mark_dirty();
         } else if self.current_page == Page::Settings {
             let st = self.state.lock().unwrap();
             self.edit_vent_level = st.config.language as u8;
             drop(st);
             self.edit_mode = true;
             self.edit_mode_start_ms = now();
+            self.mark_dirty();
         }
     }
 
@@ -368,6 +465,7 @@ impl Display {
         }
         self.edit_mode = false;
         self.edit_off_duration = false;
+        self.mark_dirty();
         true
     }
 
@@ -375,6 +473,7 @@ impl Display {
     pub fn adjust_edit_value(&mut self, delta: i32) {
         if !self.edit_mode { return; }
         self.edit_mode_start_ms = now();
+        self.mark_dirty();
         if self.current_page == Page::Home {
             if self.edit_off_duration {
                 // Adjusting off duration hours
@@ -477,17 +576,22 @@ fn draw_home(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, l
         draw_small_centered(d, s.hint_rotate_adjust, 42);
     } else if st.timed_off_active {
         // Timed off countdown
-        draw_header(d, s.ventilation);
+        draw_header(d, s.manual);
         draw_centered(d, s.level_off, 18);
         let rem = st.timed_off_remaining_min;
         let info = format!("{} {}h {}m", s.resumes_in, rem / 60, rem % 60);
         draw_small_centered(d, &info, 42);
     } else {
-        draw_header(d, s.ventilation);
-        draw_centered(d, level_name(lang, st.cwl_data.ventilation_level), 18);
-        let ind = if st.schedule_override { " M" } else if st.schedule_active { " S" } else { "" };
+        let header = if st.schedule_override { s.manual } else if st.schedule_active { s.scheduled } else { s.ventilation };
+        draw_header(d, header);
+        if st.requested_vent_level != st.cwl_data.ventilation_level {
+            draw_small(d, ">", 0, 22);
+            draw_centered(d, level_name(lang, st.requested_vent_level), 18);
+        } else {
+            draw_centered(d, level_name(lang, st.cwl_data.ventilation_level), 18);
+        }
         let mode = if st.requested_bypass_open { s.summer } else { s.winter };
-        let info = format!("{}%{}  {}", st.cwl_data.relative_ventilation, ind, mode);
+        let info = format!("{}%  {}", st.cwl_data.relative_ventilation, mode);
         draw_small_centered(d, &info, 42);
     }
 }
@@ -516,6 +620,9 @@ fn draw_temp_value(d: &mut impl DrawTarget<Color = BinaryColor>, label: &str, te
     draw_large_left(d, &val, 52, y);
 }
 
+/// Intake: temperatures entering the heat exchanger
+/// - Supply inlet (ID 80): fresh air from outside
+/// - Exhaust inlet (ID 82): stale air from the house
 fn draw_temp_in(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
     let s = tr(lang);
     draw_header(d, s.intake);
@@ -523,6 +630,9 @@ fn draw_temp_in(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner
     draw_temp_value(d, s.exhaust, st.cwl_data.exhaust_inlet_temp, 38);
 }
 
+/// Outlet: temperatures leaving the heat exchanger (only shown if CWL supports IDs 81/83)
+/// - Supply outlet (ID 81): warmed fresh air going into the house
+/// - Exhaust outlet (ID 83): cooled stale air going outside
 fn draw_temp_out(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
     let s = tr(lang);
     draw_header(d, s.outlet);

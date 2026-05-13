@@ -132,9 +132,9 @@ def idc_female_socket_2x05(printable=False):
     return body, pin_bodies
 
 
-def oled_sh1106_1_3inch():
+def oled_sh1106_0_96inch():
     """
-    1.3" SH1106 128x64 OLED module with 4-pin I2C header and mounting holes.
+    0.96" SH1106 128x64 OLED module with 4-pin I2C header and mounting holes.
     Dimensions matched to the 128x64OLED-MountingHoles footprint.
 
     Footprint origin is at top-left corner of the board.
@@ -314,6 +314,160 @@ def oled_sh1106_1_3inch():
     return pcb, glass_dark, glass_transparent, display, fpc, pins, spacer
 
 
+def oled_sh1106_1_3inch():
+    """
+    1.3" SH1106 128x64 OLED module — large variant.
+
+    Board: 35.6 × 33.8 mm. Header on the side where mounting holes are inset
+    further from the edge (KiCad-Y high). Mounting holes per oled_1_3.scad.
+
+    Pin order (looking at the front, pad numbering runs right → left along
+    the header so VDD ends up on the high-x end):
+        pad 1 = VDD (high x), 2 = GND, 3 = SCK(=SCL), 4 = SDA (low x)
+    """
+    board_w = 35.6
+    board_h = 33.8
+    board_thick = 1.6
+
+    # Mounting holes (match oled_1_3.scad)
+    mount_holes = [(2.5, 2.0), (33.0, 2.0), (2.5, 30.8), (33.0, 30.8)]
+    mount_drill = 2.2
+
+    # Header — 4 pins, 2.54mm pitch, centred between upper mounting holes
+    # (upper holes at y=30.8, inset 3mm from y=33.8 edge → header lives near that edge)
+    pin_pitch = 2.54
+    pin_y = 32.1
+    pin_x0 = (2.5 + 33.0) / 2 - 1.5 * pin_pitch  # 13.94
+    pin_positions = [(pin_x0 + i * pin_pitch, pin_y) for i in range(4)]
+    pin_sq = 0.64
+    pin_below = 7.9 - 1.5
+    pin_above = 1.5
+
+    # Glass area — centred horizontally, FPC end pointed at the header edge
+    glass_w = 34.5  # long edge, along board x
+    glass_h = 22.5  # short edge, along board y
+    # Dark/transparent split: keep the FPC strip ~3.5mm tall, rest is the dark
+    # zone where pixels live.
+    transparent_h = 3.5
+    dark_h = glass_h - transparent_h
+    glass_cx = board_w / 2
+    # Place the FPC end of the glass so it sits just above the header silkscreen
+    # box (which runs y=31.39..32.81); glass_bottom = 29.0 leaves clearance.
+    glass_bottom = 29.0
+    glass_top = glass_bottom - glass_h
+    glass_thick = 1.2
+
+    # Active display area inside the dark zone
+    disp_w = 29.8  # long edge, along board x
+    disp_h = 15.2  # short edge, along board y
+
+    # FPC at bottom of glass (between glass and header)
+    fpc_w = 18.0
+    fpc_d = 2.0
+    fpc_h = 1.0
+
+    # PCB body
+    pcb = (
+        cq.Workplane("XY")
+        .box(board_w, board_h, board_thick, centered=(True, True, False))
+        .translate((board_w / 2, -board_h / 2, 0))
+    )
+
+    # Mounting hole drills
+    for mx, my in mount_holes:
+        hole = (
+            cq.Workplane("XY")
+            .workplane(offset=-0.1)
+            .center(mx, -my)
+            .circle(mount_drill / 2)
+            .extrude(board_thick + 0.2)
+        )
+        pcb = pcb.cut(hole)
+
+    # Pin holes
+    for px, py in pin_positions:
+        hole = (
+            cq.Workplane("XY")
+            .workplane(offset=-0.1)
+            .center(px, -py)
+            .circle(0.6)
+            .extrude(board_thick + 0.2)
+        )
+        pcb = pcb.cut(hole)
+
+    # Glass — dark part (where the display sits)
+    glass_dark = (
+        cq.Workplane("XY")
+        .box(glass_w, dark_h, glass_thick, centered=(True, True, False))
+        .translate((glass_cx, -(glass_top + dark_h / 2), board_thick))
+    )
+
+    # Glass — transparent part (FPC area visible)
+    glass_transparent = (
+        cq.Workplane("XY")
+        .box(glass_w, transparent_h, glass_thick, centered=(True, True, False))
+        .translate((glass_cx, -(glass_top + dark_h + transparent_h / 2), board_thick))
+    )
+
+    # Active display
+    dark_center_y = glass_top + dark_h / 2
+    display = (
+        cq.Workplane("XY")
+        .box(disp_w, disp_h, 0.1, centered=(True, True, False))
+        .translate((glass_cx, -dark_center_y, board_thick + glass_thick))
+    )
+
+    # FPC ribbon, sitting just below the glass on the PCB
+    glass_bottom = glass_top + glass_h
+    fpc = (
+        cq.Workplane("XY")
+        .box(fpc_w, fpc_d, fpc_h, centered=(True, True, False))
+        .translate((glass_cx, -(glass_bottom + fpc_d / 2), board_thick))
+    )
+
+    # Header pins
+    pins = cq.Workplane("XY")
+    for px, py in pin_positions:
+        pin = (
+            cq.Workplane("XY")
+            .box(pin_sq, pin_sq, pin_below + board_thick + pin_above, centered=(True, True, False))
+            .translate((px, -py, -pin_below))
+        )
+        pins = pins.union(pin)
+
+    # Pin spacer
+    spacer_w = (len(pin_positions) - 1) * pin_pitch + 2.54
+    spacer_d = 2.54
+    spacer_h = 2.5
+    spacer_cx = (pin_positions[0][0] + pin_positions[-1][0]) / 2
+    spacer_cy = pin_positions[0][1]
+    spacer = (
+        cq.Workplane("XY")
+        .box(spacer_w, spacer_d, spacer_h, centered=(True, True, False))
+        .translate((spacer_cx, -spacer_cy, -spacer_h))
+    )
+    for px, py in pin_positions:
+        hole = (
+            cq.Workplane("XY")
+            .workplane(offset=-spacer_h - 0.1)
+            .center(px, -py)
+            .rect(pin_sq + 0.2, pin_sq + 0.2)
+            .extrude(spacer_h + 0.2)
+        )
+        spacer = spacer.cut(hole)
+
+    z_off = 2.6
+    pcb = pcb.translate((0, 0, z_off))
+    glass_dark = glass_dark.translate((0, 0, z_off))
+    glass_transparent = glass_transparent.translate((0, 0, z_off))
+    display = display.translate((0, 0, z_off))
+    fpc = fpc.translate((0, 0, z_off))
+    pins = pins.translate((0, 0, z_off))
+    spacer = spacer.translate((0, 0, z_off))
+
+    return pcb, glass_dark, glass_transparent, display, fpc, pins, spacer
+
+
 def main():
     import os
     os.makedirs("3dmodels", exist_ok=True)
@@ -335,8 +489,8 @@ def main():
     assy_p.export(output_p) if hasattr(assy_p, 'export') else assy_p.save(output_p)
     print(f"Generated: {output_p}")
 
-    # OLED Module
-    pcb, glass_dark, glass_trans, display, fpc, pins, spacer = oled_sh1106_1_3inch()
+    # OLED Module — 0.96" (small board, header on top edge)
+    pcb, glass_dark, glass_trans, display, fpc, pins, spacer = oled_sh1106_0_96inch()
     assy2 = cq.Assembly()
     assy2.add(pcb, name="pcb", color=cq.Color(0.0, 0.2, 0.6, 1))               # AZ-Delivery blue PCB
     assy2.add(glass_dark, name="glass_dark", color=cq.Color(0.08, 0.08, 0.08, 1))  # dark glass (display area)
@@ -345,9 +499,23 @@ def main():
     assy2.add(fpc, name="fpc", color=cq.Color(0.6, 0.45, 0.2, 1))              # tan/brown FPC
     assy2.add(pins, name="oled_pins", color=cq.Color(0.83, 0.69, 0.22, 1))     # gold pins
     assy2.add(spacer, name="spacer", color=cq.Color(0.1, 0.1, 0.1, 1))         # black spacer
-    output2 = "3dmodels/OLED_SH1106_1.3inch.step"
+    output2 = "3dmodels/OLED_SH1106_0.96inch.step"
     assy2.export(output2) if hasattr(assy2, 'export') else assy2.save(output2)
     print(f"Generated: {output2}")
+
+    # OLED Module — 1.3" (large board, header on side, pin order VDD/GND/SCK/SDA)
+    pcb_l, glass_dark_l, glass_trans_l, display_l, fpc_l, pins_l, spacer_l = oled_sh1106_1_3inch()
+    assy3 = cq.Assembly()
+    assy3.add(pcb_l, name="pcb", color=cq.Color(0.0, 0.2, 0.6, 1))
+    assy3.add(glass_dark_l, name="glass_dark", color=cq.Color(0.08, 0.08, 0.08, 1))
+    assy3.add(glass_trans_l, name="glass_trans", color=cq.Color(0.4, 0.4, 0.35, 0.6))
+    assy3.add(display_l, name="display", color=cq.Color(0.01, 0.01, 0.01, 1))
+    assy3.add(fpc_l, name="fpc", color=cq.Color(0.6, 0.45, 0.2, 1))
+    assy3.add(pins_l, name="oled_pins", color=cq.Color(0.83, 0.69, 0.22, 1))
+    assy3.add(spacer_l, name="spacer", color=cq.Color(0.1, 0.1, 0.1, 1))
+    output3 = "3dmodels/OLED_SH1106_1.3inch.step"
+    assy3.export(output3) if hasattr(assy3, 'export') else assy3.save(output3)
+    print(f"Generated: {output3}")
 
 
 if __name__ == "__main__":

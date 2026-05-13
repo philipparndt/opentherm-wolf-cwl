@@ -130,23 +130,18 @@ pub mod eth_impl {
         let mut eth = BlockingEth::wrap(esp_eth, sysloop)?;
 
         eth.start()?;
-        info!("ETH: Started, waiting for link...");
+        info!("ETH: Started (link/IP will be detected asynchronously)");
 
-        eth.wait_netif_up()?;
-
-        let ip_info = eth.eth().netif().get_ip_info()?;
-        let ip = format!("{}", ip_info.ip);
-        info!("ETH: Got IP: {}", ip);
-
-        let state = NetworkState {
-            connected: true,
-            ip_address: Some(ip),
-        };
-
-        // Ethernet driver must stay alive
+        // Do NOT block on wait_netif_up here — if the cable is unplugged the
+        // call times out after ~15 s and aborts the app. The driver keeps
+        // running in the background; the main loop polls
+        // check_network_connected() and reacts when the link comes up.
         std::mem::forget(eth);
 
-        Ok(state)
+        Ok(NetworkState {
+            connected: false,
+            ip_address: None,
+        })
     }
 }
 
