@@ -4,6 +4,16 @@ use std::path::PathBuf;
 fn main() {
     embuild::espidf::sysenv::output();
 
+    // Forward WiFi credentials from the build environment so the firmware can
+    // read them via env!() at compile time. Empty strings are fine — the
+    // runtime falls back to NVS-stored credentials when these are blank.
+    println!("cargo:rerun-if-env-changed=WIFI_SSID");
+    println!("cargo:rerun-if-env-changed=WIFI_PASSWORD");
+    let wifi_ssid = env::var("WIFI_SSID").unwrap_or_default();
+    let wifi_password = env::var("WIFI_PASSWORD").unwrap_or_default();
+    println!("cargo:rustc-env=WIFI_SSID={}", wifi_ssid);
+    println!("cargo:rustc-env=WIFI_PASSWORD={}", wifi_password);
+
     // Compile OpenTherm FFI when not simulating
     if env::var("CARGO_FEATURE_SIMULATE_OT").is_err() {
         compile_opentherm();
@@ -69,10 +79,16 @@ fn compile_opentherm() {
         .join(".embuild/espressif/tools/xtensa-esp-elf");
     let compiler = find_file(&toolchain_dir, "xtensa-esp32-elf-g++")
         .expect("Could not find xtensa-esp32-elf-g++");
+    // Must also override the archiver: cc otherwise falls back to the host
+    // `ar`/`ranlib` (Mach-O on macOS), which produces an unreadable archive
+    // for Xtensa ELF objects → undefined references at final link time.
+    let archiver = find_file(&toolchain_dir, "xtensa-esp32-elf-ar")
+        .expect("Could not find xtensa-esp32-elf-ar");
 
     let mut build = cc::Build::new();
     build
         .compiler(&compiler)
+        .archiver(&archiver)
         .cpp(true)
         .file("components/opentherm/OpenTherm.cpp")
         .file("components/opentherm/opentherm_ffi.cpp")

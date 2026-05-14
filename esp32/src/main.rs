@@ -179,9 +179,16 @@ fn main() {
     #[cfg(all(feature = "wifi", not(feature = "ethernet")))]
     {
         use network::wifi_impl::WifiNetwork;
+        // Fall back to credentials baked in at build time (from esp32/.env via
+        // build.rs) when NVS is empty — lets a freshly-flashed device join the
+        // network without going through the web setup first.
+        const BUILD_WIFI_SSID: &str = env!("WIFI_SSID");
+        const BUILD_WIFI_PASSWORD: &str = env!("WIFI_PASSWORD");
+        let ssid = if !config.wifi_ssid.is_empty() { config.wifi_ssid.as_str() } else { BUILD_WIFI_SSID };
+        let password = if !config.wifi_password.is_empty() { config.wifi_password.as_str() } else { BUILD_WIFI_PASSWORD };
         match WifiNetwork::new(peripherals.modem, sysloop.clone(), nvs_partition.clone()) {
             Ok(mut wifi) => {
-                wifi.connect(&config.wifi_ssid, &config.wifi_password).ok();
+                wifi.connect(ssid, password).ok();
                 let connected = wifi.state.connected;
                 if connected {
                     let mut st = state.lock().unwrap();

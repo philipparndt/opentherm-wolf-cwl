@@ -5,6 +5,12 @@
 PORT ?= /dev/cu.wchusbserial8310
 FEATURES ?= ethernet,simulate-ot,ot-uext,display-sh1106
 
+# Load WiFi credentials from .env (used by dev-wifi / prod-wifi). The dash on
+# -include means "don't error if the file is missing" — only the wifi targets
+# require it. Variables are exported so build.rs can read them.
+-include .env
+export WIFI_SSID WIFI_PASSWORD
+
 # Paths
 WEB_SRC := web
 WEB_OUT := data
@@ -20,13 +26,16 @@ CYAN := \033[36m
 GREEN := \033[32m
 NC := \033[0m
 
-.PHONY: build flash monitor flash-monitor dev prod build-web build-fs flash-fs flash-all clean help
+.PHONY: build flash monitor flash-monitor dev prod dev-wifi prod-wifi check-wifi-env build-web build-fs flash-fs flash-all clean help setup fix-python-env
 
 help:
 	@echo "$(CYAN)Wolf CWL Rust Firmware$(NC)"
 	@echo ""
-	@echo "  make dev            - Build, flash and monitor (simulation mode)"
-	@echo "  make prod           - Build, flash and monitor (real OpenTherm, no simulation)"
+	@echo "  make setup          - First-time: install ldproxy + espflash, patch Python env"
+	@echo "  make dev            - Build, flash and monitor (simulation mode, ethernet)"
+	@echo "  make prod           - Build, flash and monitor (real OpenTherm, ethernet)"
+	@echo "  make dev-wifi       - Build, flash and monitor (simulation mode, wifi from .env)"
+	@echo "  make prod-wifi      - Build, flash and monitor (real OpenTherm, wifi from .env)"
 	@echo "  make build          - Build firmware"
 	@echo "  make flash          - Build and flash firmware via USB"
 	@echo "  make monitor        - Open serial monitor"
@@ -38,8 +47,38 @@ help:
 	@echo "  make clean          - Clean build artifacts"
 	@echo ""
 	@echo "Features: ethernet,simulate-ot (default)"
+	@echo "WiFi targets read WIFI_SSID/WIFI_PASSWORD from esp32/.env (see .env.example)"
+	@echo ""
+	@echo "Prerequisites (one-time, outside this Makefile):"
+	@echo "  - Rust + esp toolchain via espup (creates ~/export-esp.sh)"
+	@echo "  - 'source ~/export-esp.sh' in your shell before running make"
 
-build:
+setup:
+	@echo "$(CYAN)Installing ldproxy + espflash (idempotent)...$(NC)"
+	cargo install ldproxy espflash
+	@$(MAKE) --no-print-directory fix-python-env
+	@echo "$(GREEN)Setup complete.$(NC)"
+	@echo "Make sure 'source ~/export-esp.sh' is in your shell rc, then try 'make dev-wifi'."
+
+# Python 3.9's importlib.metadata.version('ruamel.yaml') fails to find dist-info
+# directories that pip writes with underscores (ruamel_yaml-*.dist-info). The
+# ESP-IDF dep check then aborts with exit 255. Symlink the dotted names so the
+# check passes. Idempotent; cheap; run before every build so an embuild reinstall
+# can't break us silently.
+fix-python-env:
+	@VENV=".embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"; \
+	if [ -d "$$VENV" ]; then \
+		for d in "$$VENV"/ruamel_yaml-*.dist-info "$$VENV"/ruamel_yaml_clib-*.dist-info; do \
+			[ -d "$$d" ] || continue; \
+			base=$$(basename "$$d"); \
+			target=$$(echo "$$base" | sed -e 's/^ruamel_yaml_clib/ruamel.yaml.clib/' -e 's/^ruamel_yaml/ruamel.yaml/'); \
+			if [ "$$base" != "$$target" ] && [ ! -e "$$VENV/$$target" ]; then \
+				ln -s "$$base" "$$VENV/$$target"; \
+			fi; \
+		done; \
+	fi
+
+build: fix-python-env
 	@echo "$(CYAN)Building firmware (features: $(FEATURES))...$(NC)"
 	cargo build --release --features "$(FEATURES)"
 	@echo "$(GREEN)Build complete$(NC)"
@@ -59,6 +98,18 @@ dev: flash-monitor
 
 prod:
 	$(MAKE) flash-monitor FEATURES="ethernet,ot-uext,display-sh1106"
+
+check-wifi-env:
+	@if [ -z "$$WIFI_SSID" ]; then \
+		echo "Error: WIFI_SSID not set. Copy .env.example to .env and fill in your credentials."; \
+		exit 1; \
+	fi
+
+dev-wifi: check-wifi-env
+	$(MAKE) flash-monitor FEATURES="wifi,simulate-ot,ot-uext,display-sh1106"
+
+prod-wifi: check-wifi-env
+	$(MAKE) flash-monitor FEATURES="wifi,ot-uext,display-sh1106"
 
 # First-time setup: flash with partition table (erases NVS!)
 flash-init: build

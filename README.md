@@ -116,8 +116,8 @@ Many indices come in even/odd pairs for 16-bit values (even=LO, odd=HI byte).
 
 | TSP Index | Brink name | Value | Description |
 |-----------|------------|-------|-------------|
-| 6 | U4 | 20 | Min. atmospheric temperature for bypass (value × 2 = °C, so 20 → **10 °C**) |
-| 7 | U5 | 44 | Min. indoor temperature for bypass (value × 2 = °C, so 44 → **22 °C**) |
+| 6 | U4 | 20 | Bypass min. outdoor temp (value ÷ 2 = °C → **10 °C**). Bypass only opens when outdoor air ≥ this temperature. |
+| 7 | U5 | 44 | Bypass min. indoor temp (value ÷ 2 = °C → **22 °C**). Bypass only opens when indoor air ≥ this temperature. |
 
 #### Configuration Parameters
 

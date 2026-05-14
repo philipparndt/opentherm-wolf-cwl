@@ -38,6 +38,7 @@ go.work.sum
 .env
 *.sal
 *.csv
+!esp32/partitions.csv
 decode/decode
 esp32/target
 esp32/.embuild
