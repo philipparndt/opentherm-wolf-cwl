@@ -44,6 +44,10 @@ esp32/target
 esp32/.embuild
 esp32/data
 esp32/web/node_modules
+esp32-diyless/target
+esp32-diyless/.embuild
+esp32-diyless/data
+esp32-diyless/web/node_modules
 
 # PCB
 pcb/.venv

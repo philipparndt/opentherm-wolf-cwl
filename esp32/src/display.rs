@@ -1,4 +1,4 @@
-//! OLED display — 128x64 I2C, 7 pages with overlays.
+//! OLED display — 128x64 I2C, 6 pages with overlays.
 //!
 //! Driver selection is at compile time:
 //!   * default (0.96" panels): SSD1306
@@ -51,7 +51,7 @@ fn clear_disp(d: &mut Disp) {
     { d.clear(); }
 }
 
-pub const PAGE_COUNT: usize = 7;
+pub const PAGE_COUNT: usize = 6;
 const STANDBY_TIMEOUT_MS: u32 = 300_000;
 const OVERLAY_TIMEOUT_MS: u32 = 10_000;
 const EDIT_TIMEOUT_MS: u32 = 10_000;
@@ -63,12 +63,12 @@ const FONT_MEDIUM: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB12_t
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Page {
-    Home = 0, Bypass, TempIn, TempOut, Status, System, Settings,
+    Home = 0, Bypass, TempIn, Status, System, Settings,
 }
 
 impl Page {
     fn from_index(i: usize) -> Self {
-        match i % PAGE_COUNT { 0 => Self::Home, 1 => Self::Bypass, 2 => Self::TempIn, 3 => Self::TempOut, 4 => Self::Status, 5 => Self::System, 6 => Self::Settings, _ => Self::Home }
+        match i % PAGE_COUNT { 0 => Self::Home, 1 => Self::Bypass, 2 => Self::TempIn, 3 => Self::Status, 4 => Self::System, 5 => Self::Settings, _ => Self::Home }
     }
     fn index(self) -> usize { self as usize }
 }
@@ -262,7 +262,6 @@ impl Display {
                 Page::Home => draw_home(d, st, lang, edit_mode, edit_vent_level, edit_off_duration, edit_off_hours),
                 Page::Bypass => draw_bypass(d, st, lang, edit_mode, edit_vent_level),
                 Page::TempIn => draw_temp_in(d, st, lang),
-                Page::TempOut => draw_temp_out(d, st, lang),
                 Page::Status => draw_status(d, st, lang),
                 Page::System => draw_system(d, st, lang),
                 Page::Settings => draw_settings(d, st, lang, edit_mode, edit_vent_level),
@@ -628,22 +627,6 @@ fn draw_temp_in(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner
     draw_header(d, s.intake);
     draw_temp_value(d, s.supply, st.cwl_data.supply_inlet_temp, 18);
     draw_temp_value(d, s.exhaust, st.cwl_data.exhaust_inlet_temp, 38);
-}
-
-/// Outlet: temperatures leaving the heat exchanger (only shown if CWL supports IDs 81/83)
-/// - Supply outlet (ID 81): warmed fresh air going into the house
-/// - Exhaust outlet (ID 83): cooled stale air going outside
-fn draw_temp_out(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
-    let s = tr(lang);
-    draw_header(d, s.outlet);
-    let mut y = 18i32;
-    if st.cwl_data.supports_id81 {
-        draw_temp_value(d, s.supply, st.cwl_data.supply_outlet_temp, y);
-        y += 20;
-    }
-    if st.cwl_data.supports_id83 {
-        draw_temp_value(d, s.exhaust, st.cwl_data.exhaust_outlet_temp, y);
-    }
 }
 
 fn draw_status(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {

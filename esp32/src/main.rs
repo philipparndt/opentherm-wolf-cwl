@@ -260,7 +260,7 @@ fn main() {
         let display_dirty = display_dirty.clone();
         std::thread::Builder::new()
             .name("ot".into())
-            .stack_size(8192)
+            .stack_size(16384)
             .spawn(move || {
                 let mut ot = ot_master::OtMaster::new(state, ot_in, ot_out)
                     .expect("Failed to init OpenTherm");

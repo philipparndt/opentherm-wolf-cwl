@@ -10,8 +10,8 @@ The [UEXT](https://www.olimex.com/Products/Modules/UEXT/) is a 10-pin 2x5 box he
 |----------|--------|------------|----------|
 | 1 | 3.3V | — | Power |
 | 2 | GND | — | Ground |
-| 3 | TXD | GPIO 1 | (not used) |
-| 4 | RXD | GPIO 3 | (not used) |
+| 3 | TXD | GPIO 4 | OpenTherm TX (via SB3) |
+| 4 | RXD | GPIO 36 | OpenTherm RX (via SB4) |
 | 5 | SCL | GPIO 16 | OLED Display |
 | 6 | SDA | GPIO 13 | OLED Display |
 | 7 | MISO | GPIO 15 | Encoder CLK |
@@ -114,11 +114,11 @@ make gerber VARIANT=cwl-1.3
                D5: GND ──(A)──(K)── OT+           │
                                                    └── OT-
 
-  Solder bridges (GPIO selection):
-    SB3 (default closed): UEXT TXD (GPIO1) ── OT_TX_SIG
-    SB4 (default closed): UEXT RXD (GPIO3) ── OT_RX_SIG
-    SB1 (default open):   J4 GPIO4 ── OT_TX_SIG
-    SB2 (default open):   J4 GPIO36 ── OT_RX_SIG
+  Solder bridges (GPIO selection — both routes carry the same ESP pin):
+    SB3 (default closed): UEXT TXD (= GPIO4) ── OT_TX_SIG
+    SB4 (default closed): UEXT RXD (= GPIO36) ── OT_RX_SIG
+    SB1 (default open):   J4 GPIO4 ── OT_TX_SIG  (alternate route)
+    SB2 (default open):   J4 GPIO36 ── OT_RX_SIG (alternate route)
 ```
 
 ## Encoder Wiring

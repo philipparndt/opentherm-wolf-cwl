@@ -48,8 +48,10 @@ help:
 	@echo "  make ibom             - Generate Interactive HTML BOM (needs InteractiveHtmlBom plugin installed via PCM)"
 	@echo "  make clean            - Remove generated files and venvs"
 	@echo ""
-	@echo "  Variants: append VARIANT=cwl-1.3 to target the 1.3\" build."
-	@echo "  Default is VARIANT=cwl (the 0.96\" build)."
+	@echo "  Variants:"
+	@echo "    VARIANT=cwl         — 0.96\" OLED, on-board OT optocoupler circuit (default)"
+	@echo "    VARIANT=cwl-1.3     — 1.3\" OLED, on-board OT optocoupler circuit"
+	@echo "    VARIANT=cwl-diyless — DIYless D1 mini OT shield + both OLED footprints"
 
 setup: $(VENV)/bin/activate
 
@@ -68,12 +70,12 @@ $(VENV_3D)/bin/activate: requirements-3d.txt
 	touch $(VENV_3D)/bin/activate
 
 generate: setup
-	$(PYTHON) generate_schematic.py
+	VARIANT=$(VARIANT) $(PYTHON) generate_schematic.py
 	@echo ""
 	@echo "Next steps:"
-	@echo "  1. Open KiCad → New Project"
+	@echo "  1. Open KiCad → open $(VARIANT)/cwl.kicad_pro (or create the project there)"
 	@echo "  2. Open PCB Editor"
-	@echo "  3. File → Import Netlist → select wolf-cwl-shield.net"
+	@echo "  3. File → Import Netlist → select the generated .net file"
 	@echo "  4. Place components and route traces"
 
 generate-3d: setup-3d

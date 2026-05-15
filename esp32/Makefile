@@ -3,7 +3,10 @@
 
 # Configuration
 PORT ?= /dev/cu.wchusbserial8310
-FEATURES ?= ethernet,simulate-ot,ot-uext,display-sh1106
+# Defaults match the populated prototype board: 0.96" SSD1306 (no display-sh1106),
+# OT via the ext route (GPIO36/4) — works whether the on-board OT circuit or J5
+# DIYless breakout drives the lines. simulate-ot is bench-safe; `prod` swaps it.
+FEATURES ?= ethernet,simulate-ot,ot-ext
 
 # Load WiFi credentials from .env (used by dev-wifi / prod-wifi). The dash on
 # -include means "don't error if the file is missing" — only the wifi targets
@@ -46,7 +49,7 @@ help:
 	@echo "  make flash-init     - First-time: flash with partition table (erases NVS!)"
 	@echo "  make clean          - Clean build artifacts"
 	@echo ""
-	@echo "Features: ethernet,simulate-ot (default)"
+	@echo "Features: ethernet,simulate-ot,ot-ext (default — 0.96\" SSD1306, J5/UEXT OT pins)"
 	@echo "WiFi targets read WIFI_SSID/WIFI_PASSWORD from esp32/.env (see .env.example)"
 	@echo ""
 	@echo "Prerequisites (one-time, outside this Makefile):"
@@ -97,7 +100,7 @@ flash-monitor: build
 dev: flash-monitor
 
 prod:
-	$(MAKE) flash-monitor FEATURES="ethernet,ot-uext,display-sh1106"
+	$(MAKE) flash-monitor FEATURES="ethernet,ot-ext"
 
 check-wifi-env:
 	@if [ -z "$$WIFI_SSID" ]; then \
@@ -106,10 +109,10 @@ check-wifi-env:
 	fi
 
 dev-wifi: check-wifi-env
-	$(MAKE) flash-monitor FEATURES="wifi,simulate-ot,ot-uext,display-sh1106"
+	$(MAKE) flash-monitor FEATURES="wifi,simulate-ot,ot-ext"
 
 prod-wifi: check-wifi-env
-	$(MAKE) flash-monitor FEATURES="wifi,ot-uext,display-sh1106"
+	$(MAKE) flash-monitor FEATURES="wifi,ot-ext"
 
 # First-time setup: flash with partition table (erases NVS!)
 flash-init: build

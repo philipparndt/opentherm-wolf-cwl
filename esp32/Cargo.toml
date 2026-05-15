@@ -5,12 +5,12 @@ edition = "2021"
 resolver = "2"
 
 [features]
-default = ["wifi", "ot-uext", "display-rotate"]
+default = ["wifi", "ot-ext", "display-rotate"]
 wifi = []
 ethernet = []
 simulate-ot = []
-ot-uext = []        # OT on UEXT TXD(GPIO1)/RXD(GPIO3) — default, no extra wires
-ot-ext = []         # OT on GPIO4/GPIO36 via J4 EXT header — fallback, keeps serial debug
+ot-uext = []        # DEPRECATED — wrong pin assumption (GPIO1/3 aren't on UEXT). Use ot-ext.
+ot-ext = []         # OT on GPIO4/GPIO36. Works with SB3+SB4 closed (UEXT route) or SB1+SB2 (J4 route).
 display-rotate = [] # Rotate display 180° (for upside-down mounting)
 display-sh1106 = [] # Use SH1106 driver for 1.3" panels (default is SSD1306 for 0.96")
 

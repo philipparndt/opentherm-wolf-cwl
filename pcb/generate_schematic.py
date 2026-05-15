@@ -1,14 +1,32 @@
 """
 Wolf CWL OpenTherm Shield — KiCad netlist generator using SKiDL.
 
-Run with: python generate_schematic.py
+Run with: python generate_schematic.py [--variant=NAME]
+Or:       VARIANT=cwl-diyless python generate_schematic.py
+
+Variants:
+  cwl          (default) — 0.96" OLED, on-board OT optocoupler/MOSFET circuit
+  cwl-1.3      — same circuit, 1.3" OLED footprint (set in PCB editor)
+  cwl-diyless  — no on-board OT (use a DIYless D1 mini OT shield instead),
+                 both 0.96" and 1.3" OLED footprints (populate one)
+
 Output: wolf-cwl-shield.net (KiCad netlist)
 """
 
+import os
+import sys
 import warnings
 warnings.filterwarnings("ignore")
 
 from skidl import *
+
+# Variant selection — env var or `--variant=` CLI flag
+VARIANT = os.environ.get("VARIANT", "cwl")
+for arg in sys.argv[1:]:
+    if arg.startswith("--variant="):
+        VARIANT = arg.split("=", 1)[1]
+if VARIANT not in ("cwl", "cwl-1.3", "cwl-diyless"):
+    raise SystemExit(f"Unknown VARIANT: {VARIANT!r} (expected cwl, cwl-1.3, or cwl-diyless)")
 
 # Suppress SKiDL warnings about missing KiCad libs
 import logging
@@ -128,37 +146,45 @@ j1["P9"] += enc_dt
 j1["P10"] += enc_sw
 
 # =============================================================================
-# Solder Bridges — select OT GPIO source
+# Solder Bridges — select OT GPIO source (cwl/cwl-1.3 only)
 #
-# Option A (default): Bridge SB3+SB4, leave SB1+SB2 open
-#   → OT uses UEXT TXD(GPIO1)/RXD(GPIO3) — no extra wires needed
-#   → Firmware feature: ot-uext (default)
+# Both routes terminate at GPIO 4 / GPIO 36 on the Olimex ESP32-POE. The bridges
+# pick which physical path drives them:
+#   SB3+SB4 closed (default): UEXT pins 3/4 drive OT — stacked-shield, no wires.
+#   SB1+SB2 closed:           J4 (EXT GPIO header) drives OT — keeps UEXT free.
+# Firmware uses `ot-ext` either way (the deprecated `ot-uext` assumed GPIO 1/3
+# which aren't actually on the Olimex UEXT).
 #
-# Option B (fallback): Bridge SB1+SB2, leave SB3+SB4 open
-#   → OT uses GPIO4/GPIO36 via J4 (EXT header wires)
-#   → Keeps serial debug on UEXT TXD/RXD
-#   → Firmware feature: ot-ext
+# Omitted entirely on cwl-diyless: the DIYless shield is wired straight to
+# UEXT TXD/RXD via J6/J7 below, no bridges needed.
 # =============================================================================
-sb1 = SOLDER_BRIDGE_OPEN("SB1", "GPIO4→OT_TX")
-sb2 = SOLDER_BRIDGE_OPEN("SB2", "GPIO36→OT_RX")
-sb3 = SOLDER_BRIDGE_CLOSED("SB3", "TXD→OT_TX")
-sb4 = SOLDER_BRIDGE_CLOSED("SB4", "RXD→OT_RX")
+if VARIANT != "cwl-diyless":
+    sb1 = SOLDER_BRIDGE_OPEN("SB1", "GPIO4→OT_TX")
+    sb2 = SOLDER_BRIDGE_OPEN("SB2", "GPIO36→OT_RX")
+    sb3 = SOLDER_BRIDGE_CLOSED("SB3", "TXD→OT_TX")
+    sb4 = SOLDER_BRIDGE_CLOSED("SB4", "RXD→OT_RX")
 
-# SB1: GPIO4 (J4) → OT TX signal (default: closed)
-gpio4 += sb1["1"]
-sb1["2"] += ot_tx_sig
+    # SB1: GPIO4 (J4) → OT TX signal (default: open)
+    gpio4 += sb1["1"]
+    sb1["2"] += ot_tx_sig
 
-# SB2: GPIO36 (J4) → OT RX signal (default: closed)
-gpio36 += sb2["1"]
-sb2["2"] += ot_rx_sig
+    # SB2: GPIO36 (J4) → OT RX signal (default: open)
+    gpio36 += sb2["1"]
+    sb2["2"] += ot_rx_sig
 
-# SB3: UEXT TXD → OT TX signal (default: open)
-uext_txd += sb3["1"]
-sb3["2"] += ot_tx_sig
+    # SB3: UEXT TXD → OT TX signal (default: closed)
+    uext_txd += sb3["1"]
+    sb3["2"] += ot_tx_sig
 
-# SB4: UEXT RXD → OT RX signal (default: open)
-uext_rxd += sb4["1"]
-sb4["2"] += ot_rx_sig
+    # SB4: UEXT RXD → OT RX signal (default: closed)
+    uext_rxd += sb4["1"]
+    sb4["2"] += ot_rx_sig
+else:
+    # cwl-diyless: wire UEXT TXD/RXD straight through to the shield's pin
+    # headers (J6/J7 below). DIYless ot_tx_sig / ot_rx_sig nets are reused so
+    # the rest of the netlist (J5 aux breakout) stays unchanged.
+    ot_tx_sig += uext_txd
+    ot_rx_sig += uext_rxd
 
 # =============================================================================
 # J5: Auxiliary Header — +3V3, GND, TXD, RXD breakout
@@ -171,17 +197,19 @@ j5["P3"] += uext_txd        # TXD (GPIO1)
 j5["P4"] += uext_rxd        # RXD (GPIO3)
 
 # =============================================================================
-# J2: Screw Terminal — OpenTherm bus
+# J2: Screw Terminal — OpenTherm bus (cwl/cwl-1.3 only)
+# Omitted on cwl-diyless: the DIYless shield carries its own bus terminal.
 # =============================================================================
-j2 = make_connector("J2", "OpenTherm", 2, "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal")
+if VARIANT != "cwl-diyless":
+    j2 = make_connector("J2", "OpenTherm", 2, "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal")
+    j2["P1"] += ot_plus
+    j2["P2"] += ot_minus
 
-j2["P1"] += ot_plus
-j2["P2"] += ot_minus
-
 # =============================================================================
-# J3: OLED Display — direct solder pads
+# J3: OLED Display — 0.96" SSD1306 (always present)
+# Pinout pad 1 → 4: GND, VCC, SCL, SDA
 # =============================================================================
-j3 = make_connector("J3", "OLED_SH1106", 4, "SSD1306:128x64OLED-MountingHoles")
+j3 = make_connector("J3", "OLED_0.96", 4, "SSD1306:128x64OLED-MountingHoles")
 
 j3["P1"] += gnd
 j3["P2"] += vcc
@@ -189,71 +217,129 @@ j3["P3"] += scl
 j3["P4"] += sda
 
 # =============================================================================
-# OpenTherm TX: OT_TX_SIG → R1 → U1 (opto) → Q1 (MOSFET) → OT+
+# J3B: OLED Display — 1.3" SH1106 footprint (cwl-diyless only — parallel to J3)
+# Pinout pad 1 → 4: VDD, GND, SCK, SDA  (note: order differs from the 0.96")
+# Populate either J3 OR J3B, not both.
 # =============================================================================
-r1 = R("R1", "330")
-u1 = OPTO("U1", "LTV-817S-B")
-q1 = NMOS("Q1", "2N7002")
-r3 = R("R3", "4.7k")
-
-tx_led = Net("TX_LED")
-tx_gate = Net("TX_GATE")
-
-ot_tx_sig += r1["1"]
-r1["2"] += tx_led
-tx_led += u1["A"]
-u1["K"] += gnd
-u1["E"] += gnd
-u1["C"] += tx_gate
-tx_gate += q1["G"]
-tx_gate += r3["1"]
-r3["2"] += gnd
-q1["D"] += ot_plus
-q1["S"] += gnd
+if VARIANT == "cwl-diyless":
+    j3b = make_connector("J3B", "OLED_1.3", 4, "SSD1306:128x64OLED-MountingHoles-Large")
+    j3b["P1"] += vcc
+    j3b["P2"] += gnd
+    j3b["P3"] += scl
+    j3b["P4"] += sda
 
 # =============================================================================
-# OpenTherm RX: OT+ → R2 → U2 (opto) → GPIO36
+# OpenTherm interface (cwl/cwl-1.3 only)
+# Optocoupler + MOSFET + opto + zener + 1N4148 polarity-independence diodes.
+# Omitted on cwl-diyless — the DIYless shield (J6/J7 below) provides the
+# isolated bus interface in a single drop-in module.
 # =============================================================================
-r2 = R("R2", "680")
-r4 = R("R4", "10k")
-r5 = R("R5", "1k")
-u2 = OPTO("U2", "LTV-817S-B")
-d1 = DIODE("D1", "BZX384-C4V7")       # 4.7V zener (matches reference design)
-d2 = DIODE("D2", "1N4148WS")           # Bus protection — polarity independence
-d3 = DIODE("D3", "1N4148WS")
-d4 = DIODE("D4", "1N4148WS")
-d5 = DIODE("D5", "1N4148WS")
+if VARIANT != "cwl-diyless":
+    # TX: OT_TX_SIG → R1 → U1 (opto) → Q1 (MOSFET) → OT+
+    r1 = R("R1", "330")
+    u1 = OPTO("U1", "LTV-817S-B")
+    q1 = NMOS("Q1", "2N7002")
+    r3 = R("R3", "4.7k")
 
-rx_anode = Net("RX_ANODE")
-rx_cathode = Net("RX_CATHODE")
+    tx_led = Net("TX_LED")
+    tx_gate = Net("TX_GATE")
 
-ot_plus += r2["1"]
-r2["2"] += rx_anode
-rx_anode += u2["A"]
-rx_anode += d1["K"]                     # Zener cathode — clamps voltage across opto LED
-u2["K"] += rx_cathode
-rx_cathode += d1["A"]                   # Zener anode
-rx_cathode += r5["1"]
-r5["2"] += ot_minus
+    ot_tx_sig += r1["1"]
+    r1["2"] += tx_led
+    tx_led += u1["A"]
+    u1["K"] += gnd
+    u1["E"] += gnd
+    u1["C"] += tx_gate
+    tx_gate += q1["G"]
+    tx_gate += r3["1"]
+    r3["2"] += gnd
+    q1["D"] += ot_plus
+    q1["S"] += gnd
 
-u2["E"] += gnd
-u2["C"] += ot_rx_sig
-ot_rx_sig += r4["1"]
-r4["2"] += vcc
+    # RX: OT+ → R2 → U2 (opto) → GPIO36
+    r2 = R("R2", "680")
+    r4 = R("R4", "10k")
+    r5 = R("R5", "1k")
+    u2 = OPTO("U2", "LTV-817S-B")
+    d1 = DIODE("D1", "BZX384-C4V7")    # 4.7V zener (matches reference design)
+    d2 = DIODE("D2", "1N4148WS")        # Bus protection — polarity independence
+    d3 = DIODE("D3", "1N4148WS")
+    d4 = DIODE("D4", "1N4148WS")
+    d5 = DIODE("D5", "1N4148WS")
 
-# Full bridge protection — makes OT bus polarity-independent
-# Forward path:  OT+ → D2(A→K) → +3V3 clamp
-#                GND → D3(A→K) → OT-
-# Reverse path:  OT- → D4(A→K) → +3V3 clamp
-#                GND → D5(A→K) → OT+
-d2["A"] += ot_plus
-d2["K"] += vcc
-d3["A"] += gnd
-d3["K"] += ot_minus
-d4["A"] += ot_minus
-d4["K"] += vcc
-d5["A"] += gnd
-d5["K"] += ot_plus
+    rx_anode = Net("RX_ANODE")
+    rx_cathode = Net("RX_CATHODE")
+
+    ot_plus += r2["1"]
+    r2["2"] += rx_anode
+    rx_anode += u2["A"]
+    rx_anode += d1["K"]                 # Zener cathode — clamps voltage across opto LED
+    u2["K"] += rx_cathode
+    rx_cathode += d1["A"]               # Zener anode
+    rx_cathode += r5["1"]
+    r5["2"] += ot_minus
+
+    u2["E"] += gnd
+    u2["C"] += ot_rx_sig
+    ot_rx_sig += r4["1"]
+    r4["2"] += vcc
+
+    # Full bridge protection — makes OT bus polarity-independent
+    # Forward path:  OT+ → D2(A→K) → +3V3 clamp
+    #                GND → D3(A→K) → OT-
+    # Reverse path:  OT- → D4(A→K) → +3V3 clamp
+    #                GND → D5(A→K) → OT+
+    d2["A"] += ot_plus
+    d2["K"] += vcc
+    d3["A"] += gnd
+    d3["K"] += ot_minus
+    d4["A"] += ot_minus
+    d4["K"] += vcc
+    d5["A"] += gnd
+    d5["K"] += ot_plus
+
+# =============================================================================
+# J6 + J7: DIYless D1-mini OpenTherm shield direct-solder pads (cwl-diyless only)
+#
+# The shield's underside has the standard D1 mini 2×8 pin header layout. Two
+# 1×8 through-hole rows on this PCB receive the shield's pins; the user
+# solders the shield directly. Only 4 of the 16 pins are wired here:
+#
+#   J6 (left side, 1×8): pins 1..7 = RST/A0/D0/D5/D6/D7/D8 (NC), pin 8 = 3V3
+#   J7 (right side, 1×8): pin 1 = TX (NC), pin 2 = RX (NC),
+#                         pin 3 = D1 (GPIO 5)  → OT TX from shield
+#                         pin 4 = D2 (GPIO 4)  → OT RX into shield
+#                         pin 5 = D3 (NC), pin 6 = D4 (NC),
+#                         pin 7 = GND, pin 8 = 5V (NC — wire externally if your
+#                                                 DIYless revision needs it)
+#
+# Row spacing in PCB layout: 22.86 mm (0.9") center-to-center (D1 mini standard).
+# =============================================================================
+if VARIANT == "cwl-diyless":
+    j6 = make_connector("J6", "D1mini_L", 8, "Connector_PinHeader_2.54mm:PinHeader_1x08_P2.54mm_Vertical")
+    j6["P8"] += vcc  # 3V3
+
+    j7 = make_connector("J7", "D1mini_R", 8, "Connector_PinHeader_2.54mm:PinHeader_1x08_P2.54mm_Vertical")
+    j7["P3"] += ot_tx_sig  # D1 (GPIO 5) — MCU → shield → OT bus
+    j7["P4"] += ot_rx_sig  # D2 (GPIO 4) — OT bus → shield → MCU
+    j7["P7"] += gnd        # GND
+
+# =============================================================================
+# J8: UEXT debug breakout (cwl-diyless only) — all 10 UEXT signals on a 1×10
+# pin header for probing / scope / logic analyser hook-up. Mirrors J1.
+# =============================================================================
+if VARIANT == "cwl-diyless":
+    j8 = make_connector("J8", "UEXT_DBG", 10, "Connector_PinHeader_2.54mm:PinHeader_1x10_P2.54mm_Vertical")
+    j8["P1"] += vcc
+    j8["P2"] += gnd
+    j8["P3"] += uext_txd
+    j8["P4"] += uext_rxd
+    j8["P5"] += scl
+    j8["P6"] += sda
+    j8["P7"] += enc_clk
+    j8["P8"] += led_gpio
+    j8["P9"] += enc_dt
+    j8["P10"] += enc_sw
 
 # =============================================================================
 # SW1: Encoder — Alps EC12E24204A9
@@ -298,11 +384,12 @@ for i in range(1, 5):
 # Generate
 # =============================================================================
 if __name__ == "__main__":
-    generate_netlist(file_="wolf-cwl-shield.net")
+    out_file = f"wolf-cwl-shield-{VARIANT}.net" if VARIANT != "cwl" else "wolf-cwl-shield.net"
+    generate_netlist(file_=out_file)
 
     # Print circuit summary for review
     print("\n" + "=" * 70)
-    print("CIRCUIT SUMMARY — Wolf CWL OpenTherm Shield")
+    print(f"CIRCUIT SUMMARY — Wolf CWL OpenTherm Shield  [variant: {VARIANT}]")
     print("=" * 70)
 
     print("\nCOMPONENTS:")
@@ -331,9 +418,9 @@ if __name__ == "__main__":
         print("  None")
 
     print("\n" + "=" * 70)
-    print(f"Generated: wolf-cwl-shield.net")
+    print(f"Generated: {out_file}")
     print("\nImport into KiCad:")
-    print("  1. Open KiCad → New Project")
-    print("  2. Open PCB Editor")
-    print("  3. File → Import Netlist → wolf-cwl-shield.net")
-    print("  4. All footprints are pre-assigned — place and route")
+    print(f"  1. Open KiCad → open {VARIANT}/cwl.kicad_pro (or create the project)")
+    print( "  2. Open PCB Editor")
+    print(f"  3. File → Import Netlist → {out_file}")
+    print( "  4. All footprints are pre-assigned — place and route")
