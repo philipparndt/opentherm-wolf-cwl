@@ -2,7 +2,12 @@
 Generate 3D STEP models for custom PCB components.
 
 Run with: python generate_3d_models.py
-Output: 3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step
+Outputs:
+  3dmodels/IDC-Socket_2x05_P2.54mm_Vertical.step
+  3dmodels/IDC-Socket_2x05_P2.54mm_Vertical_printable.step
+  3dmodels/OLED_SH1106_0.96inch.step
+  3dmodels/OLED_SH1106_1.3inch.step
+  3dmodels/SOP-4_7.5x4.1mm_P2.54mm.step
 """
 
 import cadquery as cq
@@ -468,6 +473,98 @@ def oled_sh1106_1_3inch():
     return pcb, glass_dark, glass_transparent, display, fpc, pins, spacer
 
 
+def sop4_long_creepage():
+    """
+    SOP-4 4-pin SMD optocoupler — long-creepage variant.
+    Matches KiCad footprint Package_SO:SOP-4_7.5x4.1mm_P2.54mm and the
+    Lite-On LTV-817S-B / Sharp PC817X package dimensions.
+
+    Footprint pads sit at (±4.6875, ±1.27). The 7.5 mm and 4.1 mm in the
+    footprint name are the BODY dimensions (across × along leads), taken
+    directly from the F.Fab polygon: X=-3.75..+3.75, Y=-2.05..+2.05 with
+    a 1mm chamfer at the pin-1 corner.
+
+    Coordinate convention: CadQuery/STEP Y axis is the inverse of KiCad
+    footprint Y (KiCad PCB editor Y points down, STEP/3D Y points up). So
+    KiCad footprint pin 1 at (X=-4.6875, Y=-1.27) lands in this model at
+    (X=-4.6875, Y=+1.27).
+    """
+    # Body — matches F.Fab outline of the KiCad footprint
+    body_w = 7.50           # X (across, perpendicular to lead pitch)
+    body_l = 4.10           # Y (along lead pitch)
+    body_h = 2.10           # Z (height of plastic body)
+    body_standoff = 0.10    # gap between body bottom and PCB top
+    pin1_chamfer = 1.00     # 1mm corner cut at pin-1 indicator corner
+
+    # Pad centres (from the footprint, copied here as authoritative)
+    pad_x = 4.6875
+    pad_y = 1.27
+
+    # Lead geometry
+    lead_w = 0.45           # along Y (lead-pitch direction)
+    lead_t = 0.20           # Z thickness of the lead foil
+    body_edge_x = body_w / 2   # 3.75
+
+    # Body footprint as a polygon, matching the F.Fab pin-1 corner chamfer.
+    # F.Fab polygon (KiCad footprint coords): (-2.75,-2.05) (3.75,-2.05)
+    # (3.75,2.05) (-3.75,2.05) (-3.75,-1.05). After flipping Y for STEP space,
+    # the chamfer corner ends up at (X=-3.75, Y=+2.05) — pin 1 side.
+    body_pts = [
+        (-body_w / 2,          body_l / 2 - pin1_chamfer),  # start of pin-1 chamfer
+        (-body_w / 2 + pin1_chamfer, body_l / 2),           # end of pin-1 chamfer
+        ( body_w / 2,           body_l / 2),
+        ( body_w / 2,          -body_l / 2),
+        (-body_w / 2,          -body_l / 2),
+    ]
+    body = (
+        cq.Workplane("XY")
+        .polyline(body_pts).close()
+        .extrude(body_h)
+        .translate((0, 0, body_standoff))
+    )
+    try:
+        body = body.edges(">Z").chamfer(0.12)
+    except Exception:
+        pass  # if chamfer fails on this CQ version, leave the top sharp
+
+    # Optional pin-1 dimple — small recess on top of body, near pin 1 corner.
+    # Pin 1 is at footprint (X=-4.6875, Y=-1.27) → STEP space (X=-4.6875, Y=+1.27).
+    pin1_dimple = (
+        cq.Workplane("XY")
+        .center(-body_w / 2 + 0.9, body_l / 2 - 0.9)   # ~0.9mm in from pin-1 corner
+        .circle(0.30)
+        .extrude(0.3)
+        .translate((0, 0, body_standoff + body_h - 0.15))
+    )
+    body = body.cut(pin1_dimple)
+
+    # Four gull-wing leads (vertical drop at body edge + horizontal foot to pad).
+    # With body_w = 7.5 mm and pads at ±4.6875 mm, only ~0.94 mm of lead is
+    # visible outside the body — short stubby gull-wings, accurate to a wide
+    # SOP-4.
+    leads = cq.Workplane("XY")
+    vert_h = body_standoff + body_h / 2  # vertical reaches body mid-height
+    for sx, sy in [(-1, -1), (-1, 1), (1, 1), (1, -1)]:
+        vert_x = sx * (body_edge_x + lead_t / 2)
+        vert = (
+            cq.Workplane("XY")
+            .box(lead_t, lead_w, vert_h, centered=(True, True, False))
+            .translate((vert_x, sy * pad_y, 0))
+        )
+        foot_inner_x = sx * body_edge_x
+        foot_outer_x = sx * (pad_x + 0.20)
+        foot_len = abs(foot_outer_x - foot_inner_x)
+        foot_center_x = (foot_inner_x + foot_outer_x) / 2
+        foot = (
+            cq.Workplane("XY")
+            .box(foot_len, lead_w, lead_t, centered=(True, True, False))
+            .translate((foot_center_x, sy * pad_y, lead_t / 2))
+        )
+        leads = leads.union(vert).union(foot)
+
+    return body, leads
+
+
 def main():
     import os
     os.makedirs("3dmodels", exist_ok=True)
@@ -516,6 +613,17 @@ def main():
     output3 = "3dmodels/OLED_SH1106_1.3inch.step"
     assy3.export(output3) if hasattr(assy3, 'export') else assy3.save(output3)
     print(f"Generated: {output3}")
+
+    # SOP-4 long-creepage opto package (PC817 / LTV-817S-B compatible).
+    # Used for U1, U2 on cwl-2.0 — KiCad's bundled Package_SO library doesn't
+    # ship a STEP for the wide-body variant, only for the 3.8mm one.
+    sop4_body, sop4_leads = sop4_long_creepage()
+    assy4 = cq.Assembly()
+    assy4.add(sop4_body,  name="body",  color=cq.Color(0.05, 0.05, 0.05, 1))  # black plastic
+    assy4.add(sop4_leads, name="leads", color=cq.Color(0.80, 0.80, 0.82, 1))  # silver leads
+    output4 = "3dmodels/SOP-4_7.5x4.1mm_P2.54mm.step"
+    assy4.export(output4) if hasattr(assy4, 'export') else assy4.save(output4)
+    print(f"Generated: {output4}")
 
 
 if __name__ == "__main__":

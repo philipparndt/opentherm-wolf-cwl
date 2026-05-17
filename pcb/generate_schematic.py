@@ -73,6 +73,8 @@ def make_connector(ref, value, pin_count, footprint):
         lib, sym = "Connector_Generic", "Conn_02x08_Odd_Even"
     elif pin_count <= 4:
         lib, sym = "Connector", f"Conn_01x0{pin_count}_Pin"
+    elif pin_count == 8:
+        lib, sym = "Connector", "Conn_01x08_Pin"
     elif pin_count == 10:
         lib, sym = "Connector", "Conn_01x10_Pin"
     else:
@@ -259,15 +261,33 @@ if VARIANT != "cwl-diyless":
     j2["P2"] += ot_minus
 
 # =============================================================================
-# J3: OLED Display — 0.96" SSD1306 (always present)
-# Pinout pad 1 → 4: GND, VCC, SCL, SDA
+# J3: OLED Display
+#   cwl / cwl-1.3   : 0.96" SH1106 only, footprint 128x64OLED-MountingHoles
+#                     Pinout pad 1→4: GND, VCC, SCL, SDA
+#   cwl-2.0         : combined footprint that accepts EITHER a 0.96" or a
+#                     1.3" SH1106 module. 8 pads total — pads 1–4 for the
+#                     1.3" header, pads 5–8 for the 0.96" header. Each pin
+#                     wires to its module's required net; populating one
+#                     module leaves the other pad set unused. 3D model is
+#                     the 1.3" assembly (worst-case for case design).
+#   cwl-diyless     : 0.96" via J3 (below) AND a separate J3B for the 1.3",
+#                     placed at a different XY on the board (legacy layout).
 # =============================================================================
-j3 = make_connector("J3", "OLED_0.96", 4, "SSD1306:128x64OLED-MountingHoles")
-
-j3["P1"] += gnd
-j3["P2"] += vcc
-j3["P3"] += scl
-j3["P4"] += sda
+if VARIANT == "cwl-2.0":
+    # Combined footprint has 8 physical pads but only 4 unique pin numbers
+    # (each appearing twice — once at the 1.3" header position, once at the
+    # 0.96" header position). Schematic symbol is a clean 4-pin connector.
+    j3 = make_connector("J3", "OLED_0.96+1.3", 4, "SSD1306:128x64OLED-MountingHoles-Combined")
+    j3["P1"] += vcc
+    j3["P2"] += gnd
+    j3["P3"] += scl
+    j3["P4"] += sda
+else:
+    j3 = make_connector("J3", "OLED_0.96", 4, "SSD1306:128x64OLED-MountingHoles")
+    j3["P1"] += gnd
+    j3["P2"] += vcc
+    j3["P3"] += scl
+    j3["P4"] += sda
 
 # =============================================================================
 # J3B: OLED Display — 1.3" SH1106 footprint (cwl-diyless only — parallel to J3)
