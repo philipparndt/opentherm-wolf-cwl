@@ -4540,7 +4540,7 @@
 	)
 	(global_label "UEXT_RXD"
 		(shape bidirectional)
-		(at 326.39 97.79 180)
+		(at 326.39 96.52 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4549,7 +4549,7 @@
 		)
 		(uuid "02ac2968-c1ad-57fe-b447-ca53cc94b63d")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 326.39 97.79 0)
+			(at 326.39 96.52 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4606,7 +4606,7 @@
 	)
 	(global_label "OT_TX_SIG"
 		(shape bidirectional)
-		(at 336.55 105.41 0)
+		(at 336.55 107.95 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4615,7 +4615,7 @@
 		)
 		(uuid "2d40666a-fdb3-50df-ae76-c6523cbc37b7")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 336.55 105.41 0)
+			(at 336.55 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4672,7 +4672,7 @@
 	)
 	(global_label "UEXT_TXD"
 		(shape bidirectional)
-		(at 326.39 105.41 180)
+		(at 326.39 107.95 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4681,7 +4681,7 @@
 		)
 		(uuid "52f32ffd-261d-5017-a63e-0b4b1f6b86d7")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 326.39 105.41 0)
+			(at 326.39 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4738,7 +4738,7 @@
 	)
 	(global_label "OT_RX_SIG"
 		(shape bidirectional)
-		(at 336.55 97.79 0)
+		(at 336.55 96.52 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4747,7 +4747,7 @@
 		)
 		(uuid "5fca5bb9-e0c8-57a5-9027-77889f159eb6")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 336.55 97.79 0)
+			(at 336.55 96.52 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5956,7 +5956,7 @@
 	)
 	(symbol
 		(lib_id "Jumper:SolderJumper_2_Bridged")
-		(at 331.47 97.79 0)
+		(at 331.47 96.52 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -5966,30 +5966,28 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "2aab1c98-3bef-52fd-8d0c-75a71b921e4c")
-		(property "Reference" "SB4"
-			(at 331.47 95.25 0)
+		(property "Reference" "SB2"
+			(at 331.47 90.17 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
-				(justify left)
 			)
 		)
 		(property "Value" "RXD→OT_RX"
-			(at 331.47 100.33 0)
+			(at 331.47 92.71 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
-				(justify left)
 			)
 		)
 		(property "Footprint" "Jumper:SolderJumper-2_P1.3mm_Bridged_RoundedPad1.0x1.5mm"
-			(at 331.47 97.79 0)
+			(at 331.47 96.52 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6000,7 +5998,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 331.47 97.79 0)
+			(at 331.47 96.52 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6011,7 +6009,7 @@
 			)
 		)
 		(property "Description" "Solder Jumper, 2-pole, closed/bridged"
-			(at 331.47 97.79 0)
+			(at 331.47 96.52 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6030,7 +6028,7 @@
 		(instances
 			(project "cwl"
 				(path "/218b5f90-a139-55d3-a988-331ecbe7ee0c"
-					(reference "SB4")
+					(reference "SB2")
 					(unit 1)
 				)
 			)
@@ -6285,7 +6283,7 @@
 	)
 	(symbol
 		(lib_id "Jumper:SolderJumper_2_Bridged")
-		(at 331.47 105.41 0)
+		(at 331.47 107.95 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -6295,30 +6293,28 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "4bdabbe3-2741-57e4-a235-e3eb91c88c71")
-		(property "Reference" "SB3"
-			(at 331.47 102.87 0)
+		(property "Reference" "SB1"
+			(at 331.47 101.6 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
-				(justify left)
 			)
 		)
 		(property "Value" "TXD→OT_TX"
-			(at 331.47 107.95 0)
+			(at 331.47 104.14 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
-				(justify left)
 			)
 		)
 		(property "Footprint" "Jumper:SolderJumper-2_P1.3mm_Bridged_RoundedPad1.0x1.5mm"
-			(at 331.47 105.41 0)
+			(at 331.47 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6329,7 +6325,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 331.47 105.41 0)
+			(at 331.47 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6340,7 +6336,7 @@
 			)
 		)
 		(property "Description" "Solder Jumper, 2-pole, closed/bridged"
-			(at 331.47 105.41 0)
+			(at 331.47 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6359,7 +6355,7 @@
 		(instances
 			(project "cwl"
 				(path "/218b5f90-a139-55d3-a988-331ecbe7ee0c"
-					(reference "SB3")
+					(reference "SB1")
 					(unit 1)
 				)
 			)
