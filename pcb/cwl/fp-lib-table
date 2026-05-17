@@ -2,4 +2,5 @@
 	(version 7)
 	(lib (name "SSD1306") (type "KiCad") (uri "/Users/philipparndt/dev/smarthome/projects/opentherm-wolf-cwl/pcb/footprints/SSD1306.pretty") (options "") (descr ""))
 	(lib (name "IDC") (type "KiCad") (uri "/Users/philipparndt/dev/smarthome/projects/opentherm-wolf-cwl/pcb/footprints/IDC.pretty") (options "") (descr ""))
+	(lib (name "D1mini") (type "KiCad") (uri "/Users/philipparndt/dev/smarthome/projects/opentherm-wolf-cwl/pcb/footprints/D1mini.pretty") (options "") (descr ""))
 )

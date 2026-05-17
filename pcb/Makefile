@@ -1,9 +1,5 @@
-# Wolf CWL Shield PCB — Schematic & 3D Model Generator
-# =====================================================
-
-VENV := .venv
-PYTHON := $(VENV)/bin/python
-PIP := $(VENV)/bin/pip
+# Wolf CWL Shield PCB — 3D models & fabrication exports
+# ======================================================
 
 # Separate venv for 3D models (needs Python 3.12 for CadQuery)
 VENV_3D := .venv-3d
@@ -13,8 +9,9 @@ PYTHON3_12 := /opt/homebrew/bin/python3.12
 
 # KiCad
 KICAD_CLI := kicad-cli
-# Default variant is the 0.96" build in cwl/. Override with VARIANT=cwl-1.3 for the
-# 1.3" build, e.g. `make export-stl-full VARIANT=cwl-1.3`.
+# VARIANT picks which KiCad project to act on. Default cwl/ uses the combined
+# OLED footprint (supports both 0.96" and 1.3" modules). cwl-diyless/ uses the
+# DIYless D1-mini OT shield and has separate J3 / J3B for the two OLED sizes.
 VARIANT ?= cwl
 KICAD_PROJECT := $(VARIANT)/cwl.kicad_pcb
 FREECADCMD := /Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd
@@ -26,55 +23,30 @@ KICAD_PYTHON ?= /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framewo
 IBOM_SCRIPT ?= $(HOME)/Documents/KiCad/10.0/scripting/plugins/InteractiveHtmlBom/InteractiveHtmlBom/generate_interactive_bom.py
 
 # KiCad library paths (macOS KiCad 10)
-export KICAD9_SYMBOL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols
-export KICAD_SYMBOL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols
-export KICAD9_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
-export KICAD_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
 export KICAD9_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
 export KICAD_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
 export KICAD10_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
 
-.PHONY: generate generate-3d export-stl-full export-stl-board export-stl-parts export-stl-parts-0.96 export-stl-parts-1.3 export-stl-print gerber plot-pdf ibom clean setup setup-3d setup-svg help
+.PHONY: generate-3d export-stl-full export-stl-board export-stl-parts export-stl-parts-0.96 export-stl-parts-1.3 export-stl-print gerber plot-pdf ibom clean setup-3d help
 
 help:
 	@echo "Wolf CWL Shield PCB"
 	@echo ""
-	@echo "  make setup            - Create venv and install dependencies"
-	@echo "  make setup-svg        - Install netlistsvg (npm) for schematic SVG generation"
-	@echo "  make generate         - Generate KiCad netlist + SVG schematic (if netlistsvg installed)"
 	@echo "  make generate-3d      - Generate 3D STEP models (requires Python 3.12)"
 	@echo "  make export-stl-full  - Export full PCB assembly as STL"
 	@echo "  make export-stl-print - Export for 3D printing (floating IDC connector)"
 	@echo "  make export-stl-board - Export bare PCB only as STL"
 	@echo "  make export-stl-parts - Export components only as STL (no board)"
-	@echo "  make export-stl-parts-0.96 - Export components only with 0.96\" OLED (excludes J3B, cwl-diyless)"
-	@echo "  make export-stl-parts-1.3  - Export components only with 1.3\" OLED  (excludes J3,  cwl-diyless)"
+	@echo "  make export-stl-parts-0.96 - Export components only with 0.96\" OLED (cwl-diyless only — excludes J3B)"
+	@echo "  make export-stl-parts-1.3  - Export components only with 1.3\" OLED  (cwl-diyless only — excludes J3)"
 	@echo "  make gerber           - Export Gerbers + drill files for fabrication"
 	@echo "  make plot-pdf         - Plot fabrication / assembly PDFs (front + back)"
-	@echo "  make ibom             - Generate Interactive HTML BOM (needs InteractiveHtmlBom plugin installed via PCM)"
-	@echo "  make clean            - Remove generated files and venvs"
+	@echo "  make ibom             - Generate Interactive HTML BOM (needs InteractiveHtmlBom plugin via PCM)"
+	@echo "  make clean            - Remove generated files and venv"
 	@echo ""
 	@echo "  Variants:"
-	@echo "    VARIANT=cwl         — 0.96\" OLED, v1.x OT circuit (default; buggy — see DEBUG-NOTES.md)"
-	@echo "    VARIANT=cwl-1.3     — 1.3\" OLED, v1.x OT circuit"
-	@echo "    VARIANT=cwl-2.0     — 0.96\" OLED, Melnyk-topology OT circuit (recommended)"
-	@echo "    VARIANT=cwl-diyless — DIYless D1 mini OT shield + both OLED footprints"
-
-setup: $(VENV)/bin/activate
-
-$(VENV)/bin/activate: requirements.txt
-	python3 -m venv $(VENV)
-	$(PIP) install --upgrade pip
-	$(PIP) install -r requirements.txt
-	touch $(VENV)/bin/activate
-
-setup-svg:
-	@if ! command -v npm >/dev/null 2>&1; then \
-		echo "ERROR: npm not found. Install Node.js first (https://nodejs.org or 'brew install node')."; \
-		exit 1; \
-	fi
-	npm install -g netlistsvg
-	@echo "Installed netlistsvg. Re-run 'make generate' to produce an SVG schematic."
+	@echo "    VARIANT=cwl         — main board (combined 0.96\" + 1.3\" OLED footprint, on-board OT) [default]"
+	@echo "    VARIANT=cwl-diyless — DIYless D1-mini OT shield + two separate OLED footprints"
 
 setup-3d: $(VENV_3D)/bin/activate
 
@@ -83,21 +55,6 @@ $(VENV_3D)/bin/activate: requirements-3d.txt
 	$(PIP_3D) install --upgrade pip
 	$(PIP_3D) install -r requirements-3d.txt
 	touch $(VENV_3D)/bin/activate
-
-generate: setup
-	VARIANT=$(VARIANT) $(PYTHON) generate_schematic.py
-	@base="wolf-cwl-shield"; [ "$(VARIANT)" = "cwl" ] || base="wolf-cwl-shield-$(VARIANT)"; \
-	if [ -f "$$base.kicad_sch" ]; then \
-		$(KICAD_CLI) sch export svg --output . --no-background-color "$$base.kicad_sch" >/dev/null 2>&1 && \
-		$(KICAD_CLI) sch export pdf --output "$$base.pdf"          "$$base.kicad_sch" >/dev/null 2>&1 && \
-		echo "" && echo "Schematic preview:" && \
-		echo "  open $$base.svg     # browser-friendly" && \
-		echo "  open $$base.pdf     # printable" && \
-		echo "  open $$base.kicad_sch  # editable in eeschema"; \
-	fi
-	@echo ""
-	@echo "Review topology in the schematic BEFORE importing to PCB."
-	@echo "Then: open $(VARIANT)/cwl.kicad_pro → PCB Editor → Import Netlist."
 
 generate-3d: setup-3d
 	$(PYTHON_3D) generate_3d_models.py
@@ -144,7 +101,7 @@ export-stl-parts:
 export-stl-parts-0.96:
 	@echo "Exporting components (0.96\" OLED, excluding J3B)..."
 	@refs=`grep -oE 'property "Reference" "[^"]+"' $(KICAD_PROJECT) | sed -E 's/.*"([^"]+)"/\1/' | sort -u | grep -v '^J3B$$' | paste -sd, -`; \
-	if [ -z "$$refs" ]; then echo "No footprints in $(KICAD_PROJECT) — import netlist and place components first."; exit 1; fi; \
+	if [ -z "$$refs" ]; then echo "No footprints in $(KICAD_PROJECT)."; exit 1; fi; \
 	echo "Including refs: $$refs"; \
 	touch $(VARIANT)/cwl-parts-0.96.step; \
 	$(KICAD_CLI) pcb export step --force --subst-models --no-board-body --component-filter "$$refs" --output $(VARIANT)/cwl-parts-0.96.step $(KICAD_PROJECT); \
@@ -155,7 +112,7 @@ export-stl-parts-0.96:
 export-stl-parts-1.3:
 	@echo "Exporting components (1.3\" OLED, excluding J3)..."
 	@refs=`grep -oE 'property "Reference" "[^"]+"' $(KICAD_PROJECT) | sed -E 's/.*"([^"]+)"/\1/' | sort -u | grep -v '^J3$$' | paste -sd, -`; \
-	if [ -z "$$refs" ]; then echo "No footprints in $(KICAD_PROJECT) — import netlist and place components first."; exit 1; fi; \
+	if [ -z "$$refs" ]; then echo "No footprints in $(KICAD_PROJECT)."; exit 1; fi; \
 	echo "Including refs: $$refs"; \
 	touch $(VARIANT)/cwl-parts-1.3.step; \
 	$(KICAD_CLI) pcb export step --force --subst-models --no-board-body --component-filter "$$refs" --output $(VARIANT)/cwl-parts-1.3.step $(KICAD_PROJECT); \
@@ -219,11 +176,9 @@ ibom:
 	@echo "Exported: $(VARIANT)/bom/ibom.html"
 
 clean:
-	rm -rf $(VENV) $(VENV_3D)
-	rm -f wolf-cwl-shield*.net wolf-cwl-shield*.svg wolf-cwl-shield*.kicad_sch wolf-cwl-shield*.pdf generate_schematic.kicad_sch skidl_REPL.kicad_sch
+	rm -rf $(VENV_3D)
 	rm -f $(VARIANT)/cwl-assembly.stl $(VARIANT)/cwl-board.stl $(VARIANT)/cwl-parts.stl $(VARIANT)/cwl-parts-0.96.stl $(VARIANT)/cwl-parts-1.3.stl
 	rm -f $(VARIANT)/cwl-assembly.step $(VARIANT)/cwl-board.step $(VARIANT)/cwl-parts.step $(VARIANT)/cwl-parts-0.96.step $(VARIANT)/cwl-parts-1.3.step
 	rm -rf $(VARIANT)/gerber $(VARIANT)/cwl-gerber.zip
 	rm -rf $(VARIANT)/plot $(VARIANT)/bom
-	rm -f *.xml
 	rm -rf __pycache__

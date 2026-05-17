@@ -2561,7 +2561,7 @@
 			(uuid "1b8f8661-5b02-47f2-afc8-f51223974b2f")
 		)
 		(embedded_fonts no)
-		(model "/Users/philipparndt/dev/smarthome/projects/opentherm-wolf-cwl/pcb/3dmodels/EC12 Encoder 10mm 3pin.step"
+		(model "${KIPRJMOD}/../3dmodels/EC12 Encoder 10mm 3pin.step"
 			(offset
 				(xyz 7.5 -2.5 0)
 			)
