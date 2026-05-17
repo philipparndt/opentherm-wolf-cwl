@@ -2,7 +2,11 @@
 # ==============================================
 
 # Configuration
-PORT ?= /dev/cu.wchusbserial8310
+# PORT is optional: leave unset to let espflash/esptool auto-detect the USB
+# serial port (they'll prompt interactively if more than one is present).
+# Override with `make flash PORT=/dev/cu.wchusbserial8310` when needed.
+PORT ?=
+PORT_FLAG := $(if $(PORT),-p $(PORT),)
 # Defaults match the populated prototype board: 0.96" SSD1306 (no display-sh1106),
 # OT via the ext route (GPIO36/4) — works whether the on-board OT circuit or J5
 # DIYless breakout drives the lines. simulate-ot is bench-safe; `prod` swaps it.
@@ -88,14 +92,14 @@ build: fix-python-env
 
 flash: build
 	@echo "$(CYAN)Flashing firmware...$(NC)"
-	espflash flash -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
+	espflash flash $(PORT_FLAG) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
 	@echo "$(GREEN)Flash complete$(NC)"
 
 monitor:
-	espflash monitor -p $(PORT)
+	espflash monitor $(PORT_FLAG)
 
 flash-monitor: build
-	espflash flash --monitor -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
+	espflash flash --monitor $(PORT_FLAG) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
 
 dev: flash-monitor
 
@@ -117,7 +121,7 @@ prod-wifi: check-wifi-env
 # First-time setup: flash with partition table (erases NVS!)
 flash-init: build
 	@echo "$(CYAN)Flashing firmware + partition table (NVS will be erased)...$(NC)"
-	espflash flash -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
+	espflash flash $(PORT_FLAG) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
 	@echo "$(GREEN)Flash complete$(NC)"
 
 build-web:
@@ -132,15 +136,15 @@ build-fs: build-web
 
 flash-fs: build-fs
 	@echo "$(CYAN)Flashing SPIFFS...$(NC)"
-	$(ESPTOOL_PY) -m esptool --chip esp32 -p $(PORT) write_flash $(SPIFFS_OFFSET) $(SPIFFS_IMG)
+	$(ESPTOOL_PY) -m esptool --chip esp32 $(PORT_FLAG) write_flash $(SPIFFS_OFFSET) $(SPIFFS_IMG)
 	@echo "$(GREEN)SPIFFS flashed$(NC)"
 
 flash-all: build build-fs
 	@echo "$(CYAN)Flashing firmware + SPIFFS...$(NC)"
-	espflash flash -p $(PORT) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
-	$(ESPTOOL_PY) -m esptool --chip esp32 -p $(PORT) write_flash $(SPIFFS_OFFSET) $(SPIFFS_IMG)
+	espflash flash $(PORT_FLAG) --partition-table $(PARTITIONS) target/xtensa-esp32-espidf/release/wolf-cwl
+	$(ESPTOOL_PY) -m esptool --chip esp32 $(PORT_FLAG) write_flash $(SPIFFS_OFFSET) $(SPIFFS_IMG)
 	@echo "$(GREEN)All flashed$(NC)"
-	espflash monitor -p $(PORT)
+	espflash monitor $(PORT_FLAG)
 
 clean:
 	cargo clean

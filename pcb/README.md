@@ -26,7 +26,174 @@ Additional signals from the ESP32-POE EXT1/EXT2 headers:
 | GPIO 36 | 36 | OpenTherm Input (RX) |
 | GPIO 4 | 4 | OpenTherm Output (TX) |
 
-## Bill of Materials
+## Build Variants — pick one
+
+| Variant | Status | OT front-end | Display | Notes |
+|---------|--------|--------------|---------|-------|
+| **`cwl-2.0`** | **recommended for new builds** | Melnyk topology (Graetz bridge + PNP sink + zener-threshold RX) | 0.96" SH1106 | Reference design from [ihormelnyk.com/opentherm_adapter](https://ihormelnyk.com/opentherm_adapter); no v1.x bugs |
+| `cwl` | legacy | NMOS sink + 4-diode shunt clamp | 0.96" SH1106 | ⚠️ Known broken — see [DEBUG-NOTES.md](../DEBUG-NOTES.md). Kept here so existing fabricated boards still build. |
+| `cwl-1.3` | legacy | same as `cwl` | 1.3" SH1106 | Same bugs as `cwl` |
+| `cwl-diyless` | alternative | DIYless D1-mini shield (off-board) | 0.96" or 1.3" SH1106 | Skips the analog design entirely; drop-in commercial module |
+
+Build with `make generate VARIANT=cwl-2.0` (see [Makefile](Makefile) for full target list).
+The recommended BOM and schematic below are for `cwl-2.0`. The legacy v1.x BOM is preserved further down for reference.
+
+## cwl-2.0 Bill of Materials
+
+Single source of truth: `pcb/generate_schematic.py` (factories use real KiCad library refs → `make generate` emits both the netlist and a `.kicad_sch`).
+
+### Connectors
+
+| Ref | Component | Mouser # | Manufacturer | Description | Qty |
+|-----|-----------|----------|--------------|-------------|-----|
+| J1 | HIF3FB-10DA-2.54DSA(69) | 798-HIF3FB10DA254D69 | Hirose | 2x5 female keyed IDC socket, 2.54 mm, through-hole (mates with UEXT box header) | 1 |
+| J2 | MKDS 1,5/2-5,08 (1729018) | 651-1729018 | Phoenix Contact | 2-pos screw terminal, 5.08 mm, through-hole — OpenTherm bus | 1 |
+| J3 | — | — | — | 1×4 pads, 2.54 mm pitch, for direct OLED soldering (0.96") | 1 |
+| J4 | B3B-XH-A(LF)(SN) | 306-B3B-XH-ALFSN | JST | 3-pin JST XH header, 2.50 mm — GPIO4 + GPIO36 + GND breakout | 1 |
+| J5 | B4B-XH-A(LF)(SN) | 306-B4B-XH-ALFSN | JST | 4-pin JST XH header, 2.50 mm — +3V3/GND/TXD/RXD breakout | 1 |
+
+### OpenTherm Interface (Melnyk Topology)
+
+| Ref | Component | Mouser # | Manufacturer | Description | Qty |
+|-----|-----------|----------|--------------|-------------|-----|
+| U1, U2 | LTV-817S-B | 859-LTV-817S-B | Lite-On | Optocoupler, SOP-4 SMD (PC817 pin-compatible) | 2 |
+| Q1 | BC858A | 771-BC858A,215 | Nexperia | PNP BJT, SOT-23 (B-bin BC858B also works) | 1 |
+| D1–D4 | 1N4148WS | 621-1N4148WS-7-F | Diodes Inc | Switching diode, SOD-323F — Graetz bridge for polarity-independent bus | 4 |
+| D5 | BZT52C4V7 | 771-BZT52C4V7,115 | Nexperia | 4.7 V Zener, SOD-123, 500 mW — U1 photo-transistor protection | 1 |
+| D6 | BZT52C15 | 771-BZT52C15,115 | Nexperia | 15 V Zener, SOD-123, 500 mW — bus over-voltage clamp | 1 |
+| D7 | BZT52C4V3 | 771-BZT52C4V3,115 | Nexperia | 4.3 V Zener, SOD-123, 500 mW — RX bus-voltage threshold | 1 |
+| R1, R4 | RC0603FR-07330RL | 603-RC0603FR-07330RL | Yageo | 330 Ω, 0603, 1% — Q1 base pull-up (R1) / U1 LED current limit (R4) | 2 |
+| R2 | RC0603FR-07220RL | 603-RC0603FR-07220RL | Yageo | 220 Ω, 0603, 1% — U1 photo → Q1 base | 1 |
+| R3 | RC0603FR-07100RL | 603-RC0603FR-07100RL | Yageo | 100 Ω, 0603, 1% — Q1 collector current-sink | 1 |
+| R5 | RC0603FR-071K5L | 603-RC0603FR-071K5L | Yageo | 1.5 kΩ, 0603, 1% — U2 photo collector pull-up | 1 |
+
+### Display (0.96" SH1106 OLED)
+
+Solder a 4-pin 128×64 I²C OLED breakout to J3 (pad 1 → 4: GND, VCC, SCL, SDA).
+The 1.3" variant uses a different `cwl-1.3-2.0`-style board layout — not yet defined for v2.0. If you want a 1.3" version of cwl-2.0, regenerate with `VARIANT=cwl-2.0` and adjust the OLED footprint locally (or open an issue).
+
+### Encoder
+
+| Ref | Component | Mouser # | Manufacturer | Description | Qty |
+|-----|-----------|----------|--------------|-------------|-----|
+| SW1 | EC12E2424407 | — | Alps Alpine | Rotary encoder, 24 detents, **with push switch**, 20 mm D-shaft (⚠️ `EC12E24204A9` has **no** switch) | 1 |
+| R6, R7 | RC0603FR-0710KL | 603-RC0603FR-0710KL | Yageo | 10 kΩ, 0603, 1% — encoder CLK/DT pull-ups | 2 |
+
+### Status LED
+
+| Ref | Component | Mouser # | Manufacturer | Description | Qty |
+|-----|-----------|----------|--------------|-------------|-----|
+| LED1 | SML-LXT0805GW-TR | 696-SML-LXT0805GW | Lumex | Green LED, 0805 SMD | 1 |
+| R8 | RC0603FR-071KL | 603-RC0603FR-071KL | Yageo | 1 kΩ, 0603, 1% — LED current limit | 1 |
+
+### Mounting / hardware
+
+| Ref | Component | Description | Qty |
+|-----|-----------|-------------|-----|
+| MH1–MH4 | — | M3 mounting holes, 3.2 mm with annular pad, tied to GND | 4 |
+| SB1–SB4 | — | 0603-sized solder bridges (no part — etched into the board) | 4 |
+
+### Mouser quick-order list — cwl-2.0
+
+Single shopping list of unique parts (combine quantities across refs):
+
+| Mouser # | Part | Qty | Notes |
+|----------|------|-----|-------|
+| 798-HIF3FB10DA254D69 | Hirose UEXT 2×5 IDC socket | 1 | J1 |
+| 651-1729018 | Phoenix 2-pos screw terminal | 1 | J2 |
+| 306-B3B-XH-ALFSN | JST XH 3-pin header | 1 | J4 |
+| 306-B4B-XH-ALFSN | JST XH 4-pin header | 1 | J5 |
+| 859-LTV-817S-B | Lite-On opto SOP-4 | 2 | U1, U2 |
+| 771-BC858A,215 | Nexperia BC858A PNP SOT-23 | 1 | Q1 (buy a spare — cents) |
+| 621-1N4148WS-7-F | Diodes Inc 1N4148WS SOD-323F | 4 | D1–D4 |
+| 771-BZT52C4V3,115 | Nexperia BZT52C4V3 SOD-123 | 1 | D7 |
+| 771-BZT52C4V7,115 | Nexperia BZT52C4V7 SOD-123 | 1 | D5 |
+| 771-BZT52C15,115 | Nexperia BZT52C15 SOD-123 | 1 | D6 |
+| 603-RC0603FR-07100RL | Yageo 100 Ω 0603 | 1 | R3 |
+| 603-RC0603FR-07220RL | Yageo 220 Ω 0603 | 1 | R2 |
+| 603-RC0603FR-07330RL | Yageo 330 Ω 0603 | 2 | R1, R4 |
+| 603-RC0603FR-071KL | Yageo 1 kΩ 0603 | 1 | R8 |
+| 603-RC0603FR-071K5L | Yageo 1.5 kΩ 0603 | 1 | R5 |
+| 603-RC0603FR-0710KL | Yageo 10 kΩ 0603 | 2 | R6, R7 |
+| 696-SML-LXT0805GW | Lumex green LED 0805 | 1 | LED1 |
+| — | Alps EC12E2424407 (with switch) | 1 | SW1 — easier to source from Reichelt/TME |
+| — | 0.96" SH1106 I²C OLED | 1 | J3 — Amazon/AliExpress |
+
+## cwl-2.0 OpenTherm Schematic
+
+Generated automatically from `generate_schematic.py`. After running `make generate VARIANT=cwl-2.0`:
+
+- `wolf-cwl-shield-cwl-2.0.kicad_sch` — open in eeschema, rearrange for readability
+- `wolf-cwl-shield-cwl-2.0.svg` — browser preview
+- `wolf-cwl-shield-cwl-2.0.pdf` — printable
+
+Topology overview (Melnyk OpenTherm adapter):
+
+```
+                       OpenTherm Bus
+                  (polarity-independent — Graetz bridge)
+                       OT+        OT-
+                        │          │
+                ┌──[D1]─┤          ├─[D2]──┐
+                │       │          │       │
+              BUS_HI    │          │     BUS_HI
+                │       │          │       │
+                │       └─[D3]   [D4]┘     │      (D1–D4: 1N4148WS, SOD-323F)
+                │             │  │         │
+                └─────────  BUS_LO  ───────┘
+
+   Bus over-voltage clamp:   D6 (BZT52C15, 15 V zener)
+                             K → BUS_HI, A → BUS_LO
+
+   ── TX driver (master sinks current to signal "high" state) ─────
+                          BUS_HI
+                          │  │
+                    [R1 330] [Q1.E]
+                          │  │
+                Q1_BASE ──┴──┤  Q1 (BC858A, PNP)
+                          │  │
+                    [R2 220]
+                          │
+                  U1.C (photo collector)
+                  U1.E ── BUS_LO
+                  D5 (BZT52C4V7) protects U1 photo across BUS_LO
+
+                  Q1.C → [R3 100] → BUS_LO  (current-sink path)
+
+   MCU side (isolated through U1):
+       OT_TX_SIG → [R4 330] → U1.A (LED) → GND
+       GPIO HIGH ⇒ U1 LED on ⇒ Q1 on ⇒ master draws ~20 mA from bus
+       (Matches ihormelnyk/opentherm_library default setIdleState → HIGH —
+        no firmware-side inversion needed.)
+
+   ── RX detector (threshold-discriminates bus HIGH vs LOW) ──────
+                          BUS_HI
+                          │
+                          U2.A  (LED anode)
+                          U2.K
+                          │
+                          D7 (BZT52C4V3, 4.3 V zener cathode)
+                          │
+                          BUS_LO
+
+       The 4.3 V zener creates a ~5.5 V threshold so the U2 LED only
+       conducts at bus HIGH (~15 V), not at bus LOW (~5 V). This is the
+       comparator behaviour cwl/cwl-1.3 was missing — without it the
+       RX opto saturates in both bus states and can't decode bits.
+
+   MCU side (isolated through U2):
+       U2.C → OT_RX_SIG → [R5 1.5k] → +3V3   (pull-up on collector)
+       U2.E → GND
+       Bus HIGH ⇒ U2 photo on ⇒ OT_RX_SIG pulled LOW
+```
+
+The hard lesson behind this design: see [DEBUG-NOTES.md](../DEBUG-NOTES.md) for the multi-day debug that proved v1.x's NMOS+shunt-diode interface unfit for purpose. Don't fab v2.0 without checking the `.kicad_sch` first — netlist-only review is what shipped the original bugs.
+
+---
+
+## Legacy v1.x Bill of Materials (`cwl`, `cwl-1.3`)
+
+> ⚠️ **The v1.x circuit is known broken** — see [DEBUG-NOTES.md](../DEBUG-NOTES.md). Use cwl-2.0 for new builds. The BOM below is kept so existing fabricated v1.x boards remain buildable.
 
 ### Connectors
 
@@ -82,7 +249,9 @@ make gerber VARIANT=cwl-1.3
 |-----|-----------|----------|--------------|-------------|-----|
 | LED1 | SML-LXT0805GW-TR | 696-SML-LXT0805GW | Lumex | Green LED, 0805 SMD | 1 |
 
-## OpenTherm Schematic
+## Legacy v1.x OpenTherm Schematic
+
+> Reference for the broken v1.x design. New builds: see [cwl-2.0 OpenTherm Schematic](#cwl-20-opentherm-schematic) above.
 
 ```
                    Shield                         OT Bus
@@ -137,6 +306,8 @@ EC12E24204A9:
 
 ## KiCad Footprints
 
+For cwl-2.0, the single source of truth is `pcb/generate_schematic.py` — the factory functions there reference real KiCad symbol libraries and pick the correct footprint per part-number prefix (e.g. `BZT52C*` → `D_SOD-123`, `1N4148WS` → `D_SOD-323F`, `BC858*` → `SOT-23`). Run `make generate VARIANT=cwl-2.0` and the symbols/footprints come out automatically. The table below is for the legacy v1.x design.
+
 | Ref | KiCad Symbol | KiCad Footprint |
 |-----|-------------|-----------------|
 | J1 | Connector_Generic:Conn_02x05_Odd_Even | Connector_IDC:IDC-Header_2x05_P2.54mm_Vertical |
@@ -167,3 +338,4 @@ EC12E24204A9:
 - **2-layer PCB** is sufficient
 - **All logic is 3.3V** (UEXT standard)
 - **OpenTherm bus is polarity-independent**
+- https://ihormelnyk.com/opentherm_adapter

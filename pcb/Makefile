@@ -30,27 +30,34 @@ export KICAD9_SYMBOL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport
 export KICAD_SYMBOL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols
 export KICAD9_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
 export KICAD_FOOTPRINT_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
+export KICAD9_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
+export KICAD_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
+export KICAD10_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
 
-.PHONY: generate generate-3d export-stl-full export-stl-board export-stl-parts export-stl-print gerber plot-pdf ibom clean setup setup-3d help
+.PHONY: generate generate-3d export-stl-full export-stl-board export-stl-parts export-stl-parts-0.96 export-stl-parts-1.3 export-stl-print gerber plot-pdf ibom clean setup setup-3d setup-svg help
 
 help:
 	@echo "Wolf CWL Shield PCB"
 	@echo ""
 	@echo "  make setup            - Create venv and install dependencies"
-	@echo "  make generate         - Generate KiCad netlist"
+	@echo "  make setup-svg        - Install netlistsvg (npm) for schematic SVG generation"
+	@echo "  make generate         - Generate KiCad netlist + SVG schematic (if netlistsvg installed)"
 	@echo "  make generate-3d      - Generate 3D STEP models (requires Python 3.12)"
 	@echo "  make export-stl-full  - Export full PCB assembly as STL"
 	@echo "  make export-stl-print - Export for 3D printing (floating IDC connector)"
 	@echo "  make export-stl-board - Export bare PCB only as STL"
 	@echo "  make export-stl-parts - Export components only as STL (no board)"
+	@echo "  make export-stl-parts-0.96 - Export components only with 0.96\" OLED (excludes J3B, cwl-diyless)"
+	@echo "  make export-stl-parts-1.3  - Export components only with 1.3\" OLED  (excludes J3,  cwl-diyless)"
 	@echo "  make gerber           - Export Gerbers + drill files for fabrication"
 	@echo "  make plot-pdf         - Plot fabrication / assembly PDFs (front + back)"
 	@echo "  make ibom             - Generate Interactive HTML BOM (needs InteractiveHtmlBom plugin installed via PCM)"
 	@echo "  make clean            - Remove generated files and venvs"
 	@echo ""
 	@echo "  Variants:"
-	@echo "    VARIANT=cwl         — 0.96\" OLED, on-board OT optocoupler circuit (default)"
-	@echo "    VARIANT=cwl-1.3     — 1.3\" OLED, on-board OT optocoupler circuit"
+	@echo "    VARIANT=cwl         — 0.96\" OLED, v1.x OT circuit (default; buggy — see DEBUG-NOTES.md)"
+	@echo "    VARIANT=cwl-1.3     — 1.3\" OLED, v1.x OT circuit"
+	@echo "    VARIANT=cwl-2.0     — 0.96\" OLED, Melnyk-topology OT circuit (recommended)"
 	@echo "    VARIANT=cwl-diyless — DIYless D1 mini OT shield + both OLED footprints"
 
 setup: $(VENV)/bin/activate
@@ -60,6 +67,14 @@ $(VENV)/bin/activate: requirements.txt
 	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements.txt
 	touch $(VENV)/bin/activate
+
+setup-svg:
+	@if ! command -v npm >/dev/null 2>&1; then \
+		echo "ERROR: npm not found. Install Node.js first (https://nodejs.org or 'brew install node')."; \
+		exit 1; \
+	fi
+	npm install -g netlistsvg
+	@echo "Installed netlistsvg. Re-run 'make generate' to produce an SVG schematic."
 
 setup-3d: $(VENV_3D)/bin/activate
 
@@ -71,12 +86,18 @@ $(VENV_3D)/bin/activate: requirements-3d.txt
 
 generate: setup
 	VARIANT=$(VARIANT) $(PYTHON) generate_schematic.py
+	@base="wolf-cwl-shield"; [ "$(VARIANT)" = "cwl" ] || base="wolf-cwl-shield-$(VARIANT)"; \
+	if [ -f "$$base.kicad_sch" ]; then \
+		$(KICAD_CLI) sch export svg --output . --no-background-color "$$base.kicad_sch" >/dev/null 2>&1 && \
+		$(KICAD_CLI) sch export pdf --output "$$base.pdf"          "$$base.kicad_sch" >/dev/null 2>&1 && \
+		echo "" && echo "Schematic preview:" && \
+		echo "  open $$base.svg     # browser-friendly" && \
+		echo "  open $$base.pdf     # printable" && \
+		echo "  open $$base.kicad_sch  # editable in eeschema"; \
+	fi
 	@echo ""
-	@echo "Next steps:"
-	@echo "  1. Open KiCad → open $(VARIANT)/cwl.kicad_pro (or create the project there)"
-	@echo "  2. Open PCB Editor"
-	@echo "  3. File → Import Netlist → select the generated .net file"
-	@echo "  4. Place components and route traces"
+	@echo "Review topology in the schematic BEFORE importing to PCB."
+	@echo "Then: open $(VARIANT)/cwl.kicad_pro → PCB Editor → Import Netlist."
 
 generate-3d: setup-3d
 	$(PYTHON_3D) generate_3d_models.py
@@ -115,6 +136,32 @@ export-stl-parts:
 	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/$(VARIANT)/cwl-parts.step','$(CURDIR)/$(VARIANT)/cwl-parts.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null
 	@rm -f $(VARIANT)/cwl-parts.step
 	@echo "Exported: $(VARIANT)/cwl-parts.stl"
+
+# cwl-diyless has both OLED footprints (J3=0.96", J3B=1.3"). These two targets
+# export a parts-only STL with one of them filtered out, so each variant shows
+# just the OLED you populate. The include list is extracted from the .kicad_pcb
+# so it stays in sync if you add or remove components later.
+export-stl-parts-0.96:
+	@echo "Exporting components (0.96\" OLED, excluding J3B)..."
+	@refs=`grep -oE 'property "Reference" "[^"]+"' $(KICAD_PROJECT) | sed -E 's/.*"([^"]+)"/\1/' | sort -u | grep -v '^J3B$$' | paste -sd, -`; \
+	if [ -z "$$refs" ]; then echo "No footprints in $(KICAD_PROJECT) — import netlist and place components first."; exit 1; fi; \
+	echo "Including refs: $$refs"; \
+	touch $(VARIANT)/cwl-parts-0.96.step; \
+	$(KICAD_CLI) pcb export step --force --subst-models --no-board-body --component-filter "$$refs" --output $(VARIANT)/cwl-parts-0.96.step $(KICAD_PROJECT); \
+	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/$(VARIANT)/cwl-parts-0.96.step','$(CURDIR)/$(VARIANT)/cwl-parts-0.96.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null; \
+	rm -f $(VARIANT)/cwl-parts-0.96.step; \
+	echo "Exported: $(VARIANT)/cwl-parts-0.96.stl"
+
+export-stl-parts-1.3:
+	@echo "Exporting components (1.3\" OLED, excluding J3)..."
+	@refs=`grep -oE 'property "Reference" "[^"]+"' $(KICAD_PROJECT) | sed -E 's/.*"([^"]+)"/\1/' | sort -u | grep -v '^J3$$' | paste -sd, -`; \
+	if [ -z "$$refs" ]; then echo "No footprints in $(KICAD_PROJECT) — import netlist and place components first."; exit 1; fi; \
+	echo "Including refs: $$refs"; \
+	touch $(VARIANT)/cwl-parts-1.3.step; \
+	$(KICAD_CLI) pcb export step --force --subst-models --no-board-body --component-filter "$$refs" --output $(VARIANT)/cwl-parts-1.3.step $(KICAD_PROJECT); \
+	$(FREECADCMD) -c "import sys; sys.argv=['','$(CURDIR)/$(VARIANT)/cwl-parts-1.3.step','$(CURDIR)/$(VARIANT)/cwl-parts-1.3.stl']; exec(open('$(CURDIR)/step2stl.py').read())" 2>/dev/null; \
+	rm -f $(VARIANT)/cwl-parts-1.3.step; \
+	echo "Exported: $(VARIANT)/cwl-parts-1.3.stl"
 
 gerber:
 	@echo "Exporting Gerbers for fabrication..."
@@ -173,9 +220,9 @@ ibom:
 
 clean:
 	rm -rf $(VENV) $(VENV_3D)
-	rm -f wolf-cwl-shield.net
-	rm -f $(VARIANT)/cwl-assembly.stl $(VARIANT)/cwl-board.stl $(VARIANT)/cwl-parts.stl
-	rm -f $(VARIANT)/cwl-assembly.step $(VARIANT)/cwl-board.step $(VARIANT)/cwl-parts.step
+	rm -f wolf-cwl-shield*.net wolf-cwl-shield*.svg wolf-cwl-shield*.kicad_sch wolf-cwl-shield*.pdf generate_schematic.kicad_sch skidl_REPL.kicad_sch
+	rm -f $(VARIANT)/cwl-assembly.stl $(VARIANT)/cwl-board.stl $(VARIANT)/cwl-parts.stl $(VARIANT)/cwl-parts-0.96.stl $(VARIANT)/cwl-parts-1.3.stl
+	rm -f $(VARIANT)/cwl-assembly.step $(VARIANT)/cwl-board.step $(VARIANT)/cwl-parts.step $(VARIANT)/cwl-parts-0.96.step $(VARIANT)/cwl-parts-1.3.step
 	rm -rf $(VARIANT)/gerber $(VARIANT)/cwl-gerber.zip
 	rm -rf $(VARIANT)/plot $(VARIANT)/bom
 	rm -f *.xml
