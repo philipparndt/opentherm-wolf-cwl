@@ -4014,8 +4014,8 @@
 		(layer "Edge.Cuts")
 		(uuid "b2d267a6-e2bc-4bc5-a6a3-e99031a8a132")
 	)
-	(gr_text "philipparndt/opentherm-wolf-cwl\n2026-05-16 v0.2.0"
-		(at 83.05 83.76 0)
+	(gr_text "philipparndt/opentherm-wolf-cwl DIYless\n2026-05-17 v0.2.0"
+		(at 82.6 80.28 0)
 		(layer "F.SilkS")
 		(uuid "eeaa94c0-98c7-4da6-ba7c-6246610211f7")
 		(effects
