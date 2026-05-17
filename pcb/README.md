@@ -33,14 +33,12 @@ The [UEXT](https://www.olimex.com/Products/Modules/UEXT/) is a 10-pin 2x5 box he
 | J1 | UEXT 2×5 IDC socket | HIF3FB-10DA-2.54DSA(69) (Hirose) | `IDC:IDC-Stecker_2x05_P2.54mm_Vertical` | `Connector_Generic:Conn_02x05_Odd_Even` | 798-HIF3FB10DA254D69 | 1 |
 | J2 | Screw terminal, 2-pos 5.08 mm | MKDS 1,5/2-5,08 (Phoenix Contact) | `TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal` | `Connector:Conn_01x02_Pin` | 651-1729018 | 1 |
 | J3 | OLED header (0.96″ + 1.3″ combined) | 4-pin header (use module's own header) | `SSD1306:128x64OLED-MountingHoles-Combined` | `Connector:Conn_01x04_Pin` | — | 1 |
-| J4 | EXT-GPIO breakout, 3-pin JST XH | B3B-XH-A(LF)(SN) (JST) | `Connector_JST:JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical` | `Connector:Conn_01x03_Pin` | 306-B3B-XH-ALFSN | 1 |
-| J5 | AUX breakout, 4-pin JST XH | B4B-XH-A(LF)(SN) (JST) | `Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical` | `Connector:Conn_01x04_Pin` | 306-B4B-XH-ALFSN | 1 |
 | U1, U2 | Optocoupler, SOIC-4 | LTV-817S-B (Lite-On) | `Package_SO:SOP-4_7.5x4.1mm_P2.54mm` | `Isolator:PC817` | 859-LTV-817S-B | 2 |
 | Q1 | PNP BJT, SOT-23 | BC858A or BC858B (Nexperia) | `Package_TO_SOT_SMD:SOT-23` | `Transistor_BJT:BC858` | 771-BC858A,215 | 1 |
-| D1–D4 | Switching diode, SOD-323F | 1N4148WS (Diodes Inc) | `Diode_SMD:D_SOD-323F` | `Device:D` | 621-1N4148WS-7-F | 4 |
-| D5 | 4.7 V zener, SOD-123, 500 mW | BZT52C4V7 (Nexperia) | `Diode_SMD:D_SOD-123` | `Device:D_Zener` | 771-BZT52C4V7,115 | 1 |
-| D6 | 15 V zener, SOD-123, 500 mW | BZT52C15 (Nexperia) | `Diode_SMD:D_SOD-123` | `Device:D_Zener` | 771-BZT52C15,115 | 1 |
-| D7 | 4.3 V zener, SOD-123, 500 mW | BZT52C4V3 (Nexperia) | `Diode_SMD:D_SOD-123` | `Device:D_Zener` | 771-BZT52C4V3,115 | 1 |
+| D1–D4 | Switching diode, SOD-323 | 1N4148WS (Vishay) | `Diode_SMD:D_SOD-323` | `Device:D` | 78-1N4148WS-HG3_A-08 | 4 |
+| D5 | 4.7 V zener, SOD-123, 500 mW | BZT52C4V7 (Vishay) | `Diode_SMD:D_SOD-123` | `Device:D_Zener` | 78-BZT52C4V7-E3-08 | 1 |
+| D6 | 15 V zener, SOD-123, 500 mW | BZT52C15 (Vishay) | `Diode_SMD:D_SOD-123` | `Device:D_Zener` | 78-BZT52C15-E3-08 | 1 |
+| D7 | 4.3 V zener, SOD-123, 500 mW | BZT52C4V3 (Vishay) | `Diode_SMD:D_SOD-123` | `Device:D_Zener` | 78-BZT52C4V3-E3-08 | 1 |
 | R1, R4 | 330 Ω, 0603, 1 % | RC0603FR-07330RL (Yageo) | `Resistor_SMD:R_0603_1608Metric` | `Device:R` | 603-RC0603FR-07330RL | 2 |
 | R2 | 220 Ω, 0603, 1 % | RC0603FR-07220RL (Yageo) | `Resistor_SMD:R_0603_1608Metric` | `Device:R` | 603-RC0603FR-07220RL | 1 |
 | R3 | 100 Ω, 0603, 1 % | RC0603FR-07100RL (Yageo) | `Resistor_SMD:R_0603_1608Metric` | `Device:R` | 603-RC0603FR-07100RL | 1 |
@@ -50,7 +48,7 @@ The [UEXT](https://www.olimex.com/Products/Modules/UEXT/) is a 10-pin 2x5 box he
 | SW1 | Rotary encoder w/ switch | EC12E2424407 (Alps Alpine) | `Rotary_Encoder:RotaryEncoder_Alps_EC12E-Switch_Vertical_H20mm` | `Device:RotaryEncoder_Switch` | — | 1 |
 | LED1 | Green LED, 0805 | SML-LXT0805GW-TR (Lumex) | `LED_SMD:LED_0805_2012Metric` | `Device:LED` | 696-SML-LXT0805GW | 1 |
 | MH1–MH4 | M3 mounting hole, GND-tied | — | `MountingHole:MountingHole_3.2mm_M3_Pad_Via` | `Mechanical:MountingHole_Pad` | — | 4 |
-| SB1–SB4 | 0603 solder bridges (etched into board, no part) | — | `Jumper:SolderJumper-2_P1.3mm_*` | `Jumper:SolderJumper_2_Open` / `_Bridged` | — | — |
+| SB3, SB4 | UEXT TX/RX → OT routing bridges (etched into board, no part) | — | `Jumper:SolderJumper-2_P1.3mm_Bridged_RoundedPad1.0x1.5mm` | `Jumper:SolderJumper_2_Bridged` | — | — |
 | — | 0.96″ SH1106 OLED module, I²C, 4-pin | — | — | — | (Amazon / AliExpress) | 1 (pick one) |
 | — | 1.3″ SH1106 OLED module, I²C, 4-pin | — | — | — | (Amazon / AliExpress) | 1 (pick one) |
 
