@@ -227,9 +227,7 @@ impl Display {
         }
 
         // Render once into the framebuffer (the source of truth for both the
-        // OLED and the web mirror). Times every pass so we can see whether
-        // rendering or the I²C flush dominates.
-        let t_render_start = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
+        // OLED and the web mirror).
         self.fb.clear();
         {
             let st = self.state.lock().unwrap();
@@ -237,34 +235,16 @@ impl Display {
                 self.edit_vent_level, self.edit_off_duration, self.edit_off_idx,
                 self.overlay_active, &self.overlay_header, &self.overlay_message);
         }
-        let t_after_render = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
 
         // Push the rendered framebuffer to the OLED. `draw_iter` yields every
         // pixel (on + off) so we don't need a separate `clear_disp` first.
-        let mut t_after_blit = t_after_render;
-        let mut t_after_flush = t_after_render;
         if let Some(ref mut d) = self.display {
             let _ = d.draw_iter(self.fb.pixels());
-            t_after_blit = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
             d.flush().ok();
-            t_after_flush = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
         }
 
         // Publish framebuffer for the web mirror (memcpy of 1 KB).
         self.state.lock().unwrap().display_framebuffer = self.fb.buf;
-        let t_done = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
-
-        let render_us = t_after_render - t_render_start;
-        let blit_us = t_after_blit - t_after_render;
-        let flush_us = t_after_flush - t_after_blit;
-        let publish_us = t_done - t_after_flush;
-        let total_us = t_done - t_render_start;
-        if total_us > 5_000 {
-            info!(
-                "DISP total={}us render={}us blit={}us flush={}us publish={}us",
-                total_us, render_us, blit_us, flush_us, publish_us
-            );
-        }
     }
 
     fn render_content(

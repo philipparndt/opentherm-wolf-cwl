@@ -130,7 +130,7 @@ mod rmt {
         rmt_rx_channel_config_t, rmt_rx_done_event_data_t, rmt_rx_event_callbacks_t,
         rmt_rx_register_event_callbacks, rmt_symbol_word_t, rmt_transmit,
         rmt_transmit_config_t, rmt_tx_channel_config_t, rmt_tx_wait_all_done,
-        soc_periph_rmt_clk_src_t_RMT_CLK_SRC_APB, vQueueDelete,
+        soc_periph_rmt_clk_src_t_RMT_CLK_SRC_REF_TICK, vQueueDelete,
         xQueueCreateCountingSemaphore, xQueueGiveFromISR, xQueueReceive, BaseType_t,
         QueueHandle_t, ESP_OK,
     };
@@ -141,6 +141,17 @@ mod rmt {
     const HALF_BIT_US: u16 = 500;
     /// Pulse widths above this are interpreted as two half-bits (a bit-boundary merge).
     const MERGE_THRESHOLD_US: u16 = 750;
+    /// TX is timed at 1 µs / tick so the 500 µs half-bits encode exactly. The
+    /// HALF_BIT_US constant is reused directly as a tick count in encode_bit_word.
+    const TX_RESOLUTION_HZ: u32 = 1_000_000;
+    /// RX uses a coarser 10 µs / tick to make signal_range_max_ns large enough
+    /// to span the slave's 20-800 ms response delay. At 1 MHz the 15-bit
+    /// idle-threshold register caps out at ~32 ms; at 100 kHz it reaches
+    /// ~327 ms. 10 µs granularity on RX is still ~50× tighter than a half-bit,
+    /// well within Manchester decode tolerance.
+    const RX_RESOLUTION_HZ: u32 = 100_000;
+    /// 10 µs per RX tick (= 1 / RX_RESOLUTION_HZ in seconds).
+    const RX_US_PER_TICK: u32 = 1_000_000 / RX_RESOLUTION_HZ;
     /// 1 start + 32 data + 1 stop.
     const FRAME_BITS: usize = 34;
     /// Generous worst-case RX buffer — only ~34 symbols are ever produced for a
@@ -184,11 +195,24 @@ mod rmt {
 
     /// Decode the half-bit expansion of received RMT symbols back into a 32-bit
     /// frame. See design.md §4 for the algorithm proof.
+    ///
+    /// Two real-world details the basic Manchester model doesn't cover:
+    ///
+    /// * **Leading HIGH idle.** After we set `eot_level=1` and arm RX, the
+    ///   bus stays HIGH until the slave starts responding 20-100 ms later.
+    ///   RMT captures that idle as one or more HIGH pulses before the actual
+    ///   start bit. Since the OT start bit is "1" (LOW → HIGH), any HIGH
+    ///   half-bit observed before the first LOW is idle and must be skipped.
+    /// * **Trailing HIGH idle.** After the slave's stop bit, the line goes
+    ///   back to HIGH and RMT closes the receive window ~1.5 ms later. That
+    ///   tail-end HIGH is recorded as one extra pulse we need to ignore once
+    ///   we already have the 68 half-bits of the frame.
     fn decode_symbols(items: &[rmt_symbol_word_t]) -> Result<u32, ()> {
         let mut half_bits: [bool; FRAME_BITS * 2] = [false; FRAME_BITS * 2];
         let mut n = 0usize;
+        let mut started = false;
 
-        for sym in items {
+        'outer: for sym in items {
             let val = unsafe { sym.val };
             if val == 0 {
                 break; // zero symbol = end of capture
@@ -202,14 +226,26 @@ mod rmt {
                 if dur == 0 {
                     break;
                 }
-                if n >= half_bits.len() {
-                    return Err(());
+                // RX runs at 100 kHz (10 µs / tick); convert to µs for the
+                // merge-threshold comparison.
+                let dur_us = (dur as u32).saturating_mul(RX_US_PER_TICK);
+                // Skip any leading HIGH idle before the slave's start bit.
+                if !started {
+                    if lvl {
+                        continue;
+                    }
+                    started = true;
+                }
+                // We already have the full frame — anything beyond is the
+                // trailing HIGH idle the RMT records before closing.
+                if n >= FRAME_BITS * 2 {
+                    break 'outer;
                 }
                 half_bits[n] = lvl;
                 n += 1;
-                if dur > MERGE_THRESHOLD_US {
-                    if n >= half_bits.len() {
-                        return Err(());
+                if dur_us > MERGE_THRESHOLD_US as u32 {
+                    if n >= FRAME_BITS * 2 {
+                        break 'outer;
                     }
                     half_bits[n] = lvl;
                     n += 1;
@@ -217,6 +253,17 @@ mod rmt {
             }
         }
 
+        // RMT's signal_range_max_ns close trigger is itself the pulse that
+        // ends the receive — that pulse is *not* written to the buffer. For
+        // OT frames the trailing pulse is the stop bit's second half (HIGH)
+        // merged with the trailing idle, so we systematically lose h[67].
+        // We can recover deterministically: the stop bit must be 1 (encoded
+        // LOW→HIGH), so h[67] is always HIGH when the rest of the frame is
+        // intact. Pad it when we ended exactly one half-bit short.
+        if n == FRAME_BITS * 2 - 1 {
+            half_bits[n] = true;
+            n += 1;
+        }
         if n != FRAME_BITS * 2 {
             return Err(());
         }
@@ -286,8 +333,13 @@ mod rmt {
                 // TX channel on `out_pin`
                 let mut tx_cfg: rmt_tx_channel_config_t = core::mem::zeroed();
                 tx_cfg.gpio_num = out_pin as gpio_num_t;
-                tx_cfg.clk_src = soc_periph_rmt_clk_src_t_RMT_CLK_SRC_APB;
-                tx_cfg.resolution_hz = 1_000_000; // 1 µs / tick
+                // Both TX and RX must share a clock source on the ESP32 RMT
+                // group; using REF_TICK (1 MHz) lets the RX channel reach a
+                // low enough resolution for the long signal_range_max_ns we
+                // need (see RX_RESOLUTION_HZ comment). TX still gets 1 µs /
+                // tick from REF_TICK with divider 1.
+                tx_cfg.clk_src = soc_periph_rmt_clk_src_t_RMT_CLK_SRC_REF_TICK;
+                tx_cfg.resolution_hz = TX_RESOLUTION_HZ; // 1 µs / tick
                 tx_cfg.mem_block_symbols = 64;
                 tx_cfg.trans_queue_depth = 2;
                 // Drive the line HIGH while no transmission is active. The
@@ -304,9 +356,22 @@ mod rmt {
                 // RX channel on `in_pin`
                 let mut rx_cfg: rmt_rx_channel_config_t = core::mem::zeroed();
                 rx_cfg.gpio_num = in_pin as gpio_num_t;
-                rx_cfg.clk_src = soc_periph_rmt_clk_src_t_RMT_CLK_SRC_APB;
-                rx_cfg.resolution_hz = 1_000_000;
+                // Sourcing RX from REF_TICK (1 MHz) instead of APB (80 MHz)
+                // lets the /256-max divider reach the low resolution we need.
+                // At APB the floor is 312.5 kHz → ~104 ms signal_range_max_ns
+                // cap, not enough margin over the slave's ~70 ms delay; with
+                // REF_TICK the floor is 3.9 kHz → ~8 s cap.
+                rx_cfg.clk_src = soc_periph_rmt_clk_src_t_RMT_CLK_SRC_REF_TICK;
+                rx_cfg.resolution_hz = RX_RESOLUTION_HZ;
                 rx_cfg.mem_block_symbols = 128;
+                // The input comparator on the OT shield (custom PCB on this
+                // device) inverts the bus signal — a LOW on the wire reads
+                // HIGH on this GPIO and vice versa. The C++ OT library was
+                // implicitly designed for that polarity; our Manchester
+                // decoder expects the wire-side convention (start bit =
+                // LOW → HIGH). Have RMT invert the input so the captured
+                // symbols match.
+                rx_cfg.flags.set_invert_in(1);
 
                 let mut rx_chan: rmt_channel_handle_t = ptr::null_mut();
                 if rmt_new_rx_channel(&rx_cfg, &mut rx_chan) != ESP_OK as esp_err_t {
@@ -398,10 +463,15 @@ mod rmt {
                 // before the slave's 20-100 ms response arrives. Transmitting
                 // first sidesteps that, and the slave's spec-mandated
                 // ≥ 20 ms turnaround leaves plenty of slack to arm RX.
-                let tx_cfg = rmt_transmit_config_t {
-                    loop_count: 0,
-                    flags: core::mem::zeroed(),
-                };
+                //
+                // eot_level=1 holds the line HIGH after the stop bit.
+                // OpenTherm idle = HIGH (no master current draw); leaving the
+                // RMT default (eot=0, line LOW) keeps the bus in master-active
+                // state for the entire inter-frame gap and the CWL never
+                // responds.
+                let mut tx_cfg: rmt_transmit_config_t = core::mem::zeroed();
+                tx_cfg.loop_count = 0;
+                tx_cfg.flags.set_eot_level(1);
                 let tx_bytes = tx_symbols.len() * core::mem::size_of::<rmt_symbol_word_t>();
                 if rmt_transmit(
                     self.tx_chan,
@@ -419,10 +489,19 @@ mod rmt {
                 let _ = rmt_tx_wait_all_done(self.tx_chan, 200);
 
                 // 2. Arm RX for the slave's response.
+                //
+                // signal_range_max_ns has to span both the leading HIGH idle
+                // before the slave starts (20-800 ms per spec, ~70 ms on Wolf)
+                // *and* the trailing idle after its stop bit that closes the
+                // window. 1.5 ms would close the window before the slave even
+                // begins, leaving `count = 0` and a spurious Invalid. 250 ms
+                // covers worst-case observed response delays with margin,
+                // while still letting the close-on-trailing-idle finish well
+                // inside RESPONSE_TIMEOUT_MS.
                 self.ctx.received_count.store(0, Ordering::Release);
                 let rx_cfg = rmt_receive_config_t {
                     signal_range_min_ns: 1_000,
-                    signal_range_max_ns: 1_500_000,
+                    signal_range_max_ns: 250_000_000,
                 };
                 let rx_buf_ptr = self.rx_buffer.as_mut_ptr() as *mut core::ffi::c_void;
                 let rx_buf_bytes = RX_BUFFER_SYMBOLS * core::mem::size_of::<rmt_symbol_word_t>();
