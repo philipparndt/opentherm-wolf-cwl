@@ -225,6 +225,7 @@ fn handle_command(topic: &str, message: &str, state: &AppState, _base_topic: &st
             if level <= 3 {
                 st.requested_vent_level = level;
                 st.config.ventilation_level = level;
+                st.initial_level_known = true;
                 st.display_wake_requested = true;
                 info!("MQTT: Level set to {} ({})", level, ventilation_level_name(level));
             }
@@ -233,6 +234,7 @@ fn handle_command(topic: &str, message: &str, state: &AppState, _base_topic: &st
         let open = matches!(message.trim(), "1" | "true" | "on");
         st.requested_bypass_open = open;
         st.config.bypass_open = open;
+        st.persist_config = true;
         st.display_wake_requested = true;
         info!("MQTT: Bypass {}", if open { "open" } else { "closed" });
     } else if topic.ends_with("/set/filter_reset") {
@@ -241,11 +243,13 @@ fn handle_command(topic: &str, message: &str, state: &AppState, _base_topic: &st
             info!("MQTT: Filter reset triggered");
         }
     } else if topic.ends_with("/set/off_timer") {
-        if let Ok(hours) = message.trim().parse::<u8>() {
-            if hours >= 1 && hours <= 99 {
-                st.timed_off_request = Some(hours);
+        // Payload is minutes (15..=20160). Range covers the encoder table:
+        // 15m through 2w.
+        if let Ok(minutes) = message.trim().parse::<u16>() {
+            if (15..=20160).contains(&minutes) {
+                st.timed_off_request = Some(minutes);
                 st.display_wake_requested = true;
-                info!("MQTT: Timed off requested for {}h", hours);
+                info!("MQTT: Timed off requested for {} min", minutes);
             }
         }
     }

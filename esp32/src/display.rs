@@ -90,7 +90,10 @@ pub struct Display {
     pub edit_mode: bool,
     pub edit_vent_level: u8,
     pub edit_off_duration: bool,
-    pub edit_off_hours: u8,
+    /// Index into `cwl_data::OFF_DURATIONS_MIN` for the currently-selected
+    /// off duration in edit mode. Encoder rotation moves through the table
+    /// (15 m → 30 m → … → 2 w).
+    pub edit_off_idx: u8,
     pub standby: bool,
     last_activity_ms: u32,
     overlay_active: bool,
@@ -99,6 +102,10 @@ pub struct Display {
     overlay_start_ms: u32,
     edit_mode_start_ms: u32,
     dirty: DisplayDirty,
+    // Tracks the current half of the filter-blink cycle (1 s on / 1 s off) so
+    // update() can flip the dirty flag exactly when the phase boundary crosses
+    // while filter_dirty is true, instead of forcing a redraw every frame.
+    last_filter_blink_phase: bool,
 }
 
 impl Display {
@@ -151,10 +158,11 @@ impl Display {
             display: if ok { Some(display) } else { None },
             fb: FrameBuffer::new(),
             state, current_page: Page::Home, edit_mode: false, edit_vent_level: 2,
-            edit_off_duration: false, edit_off_hours: 1, standby: false,
+            edit_off_duration: false, edit_off_idx: 3, standby: false, // default 1h (index 3)
             last_activity_ms: now(), overlay_active: false, overlay_header: String::new(),
             overlay_message: String::new(), overlay_start_ms: 0, edit_mode_start_ms: 0,
             dirty,
+            last_filter_blink_phase: false,
         }
     }
 
@@ -197,6 +205,20 @@ impl Display {
             self.mark_dirty();
         }
 
+        // Filter-maintenance blink on the Home page: "Filter" shown for 1 s,
+        // hidden for 1 s. Force a redraw exactly when the phase flips so we
+        // don't burn cycles re-rendering between transitions.
+        if self.current_page == Page::Home {
+            let filter_dirty = self.state.lock().unwrap().cwl_data.filter_dirty;
+            if filter_dirty {
+                let phase = (now_ms / 1000) % 2 == 0;
+                if phase != self.last_filter_blink_phase {
+                    self.last_filter_blink_phase = phase;
+                    self.mark_dirty();
+                }
+            }
+        }
+
         // Skip the render path entirely if nothing has changed. The standby /
         // overlay / edit-mode timeout checks above still run on every call so
         // they remain time-driven even while we're idle.
@@ -212,7 +234,7 @@ impl Display {
         {
             let st = self.state.lock().unwrap();
             Self::render_content(&mut self.fb, &st, self.current_page, self.edit_mode,
-                self.edit_vent_level, self.edit_off_duration, self.edit_off_hours,
+                self.edit_vent_level, self.edit_off_duration, self.edit_off_idx,
                 self.overlay_active, &self.overlay_header, &self.overlay_message);
         }
         let t_after_render = unsafe { esp_idf_svc::sys::esp_timer_get_time() };
@@ -249,7 +271,7 @@ impl Display {
         d: &mut impl DrawTarget<Color = BinaryColor>,
         st: &AppStateInner,
         page: Page, edit_mode: bool, edit_vent_level: u8,
-        edit_off_duration: bool, edit_off_hours: u8,
+        edit_off_duration: bool, edit_off_idx: u8,
         overlay_active: bool, overlay_header: &str, overlay_message: &str,
     ) {
         if overlay_active && !edit_mode {
@@ -259,7 +281,7 @@ impl Display {
         } else {
             let lang = st.config.language;
             match page {
-                Page::Home => draw_home(d, st, lang, edit_mode, edit_vent_level, edit_off_duration, edit_off_hours),
+                Page::Home => draw_home(d, st, lang, edit_mode, edit_vent_level, edit_off_duration, edit_off_idx),
                 Page::Bypass => draw_bypass(d, st, lang, edit_mode, edit_vent_level),
                 Page::TempIn => draw_temp_in(d, st, lang),
                 Page::Status => draw_status(d, st, lang),
@@ -320,7 +342,7 @@ impl Display {
         fb.clear();
         let st = self.state.lock().unwrap();
         Self::render_content(fb, &st, self.current_page, self.edit_mode,
-            self.edit_vent_level, self.edit_off_duration, self.edit_off_hours,
+            self.edit_vent_level, self.edit_off_duration, self.edit_off_idx,
             self.overlay_active, &self.overlay_header, &self.overlay_message);
         drop(st);
         self.state.lock().unwrap().display_framebuffer = fb.buf;
@@ -399,7 +421,7 @@ impl Display {
             self.edit_vent_level = if st.timed_off_active { 0 } else { st.cwl_data.ventilation_level };
             drop(st);
             self.edit_off_duration = false;
-            self.edit_off_hours = 1;
+            self.edit_off_idx = 3; // default 1h
             self.edit_mode = true;
             self.edit_mode_start_ms = now();
             self.mark_dirty();
@@ -426,8 +448,10 @@ impl Display {
         if apply && self.current_page == Page::Home {
             if self.edit_off_duration {
                 // Stage 2 confirmed → activate timed off
+                let idx = (self.edit_off_idx as usize).min(crate::cwl_data::OFF_DURATIONS_MIN.len() - 1);
+                let minutes = crate::cwl_data::OFF_DURATIONS_MIN[idx];
                 let mut st = self.state.lock().unwrap();
-                st.timed_off_request = Some(self.edit_off_hours);
+                st.timed_off_request = Some(minutes);
                 st.display_wake_requested = true;
             } else if self.edit_vent_level == 4 {
                 // Selected Schedule → clear override, return to schedule control
@@ -439,7 +463,7 @@ impl Display {
             } else if self.edit_vent_level == 0 {
                 // Selected Off → enter duration sub-stage
                 self.edit_off_duration = true;
-                self.edit_off_hours = 1;
+                self.edit_off_idx = 3; // default 1h
                 self.edit_mode_start_ms = now();
                 return false; // Don't exit edit mode
             } else {
@@ -451,12 +475,14 @@ impl Display {
                 st.requested_vent_level = self.edit_vent_level;
                 st.config.ventilation_level = self.edit_vent_level;
                 st.schedule_override = true;
+                st.initial_level_known = true;
             }
         } else if apply && self.current_page == Page::Bypass {
             let open = self.edit_vent_level != 0;
             let mut st = self.state.lock().unwrap();
             st.requested_bypass_open = open;
             st.config.bypass_open = open;
+            st.persist_config = true;
         } else if apply && self.current_page == Page::Settings {
             let mut st = self.state.lock().unwrap();
             st.config.language = Language::from_u8(self.edit_vent_level);
@@ -475,16 +501,16 @@ impl Display {
         self.mark_dirty();
         if self.current_page == Page::Home {
             if self.edit_off_duration {
-                // Adjusting off duration hours
-                let new_hours = self.edit_off_hours as i32 + delta;
-                if new_hours < 1 {
-                    // Rotate back past 1h → exit duration sub-stage, go to Schedule
+                // Step through the discrete OFF_DURATIONS_MIN table.
+                let max = crate::cwl_data::OFF_DURATIONS_MIN.len() as i32 - 1;
+                let new_idx = self.edit_off_idx as i32 + delta;
+                if new_idx < 0 {
+                    // Rotate back past the shortest entry → exit duration
+                    // sub-stage and reselect Schedule from the level picker.
                     self.edit_off_duration = false;
                     self.edit_vent_level = 4; // Schedule
-                } else if new_hours > 99 {
-                    self.edit_off_hours = 99;
                 } else {
-                    self.edit_off_hours = new_hours as u8;
+                    self.edit_off_idx = new_idx.min(max) as u8;
                 }
             } else {
                 // Cycling through levels 0-4 (Off/Reduced/Normal/Party/Schedule)
@@ -560,12 +586,20 @@ fn draw_overlay(d: &mut impl DrawTarget<Color = BinaryColor>, header: &str, mess
     draw_centered(d, message, 30);
 }
 
-fn draw_home(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language, edit_mode: bool, edit_level: u8, edit_off_duration: bool, edit_off_hours: u8) {
+fn draw_home(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language, edit_mode: bool, edit_level: u8, edit_off_duration: bool, edit_off_idx: u8) {
     let s = tr(lang);
+    // Filter-maintenance: when the CWL is asking for service, blink "Filter"
+    // with a 2 s period (1 s on / 1 s off) in the level slot — replacing the
+    // "Normal" / "Party" / etc. text — while keeping the regular header and
+    // the m³/h info line. Edit-mode is unaffected so an interaction in
+    // progress isn't blocked.
+    let filter_blink_on = st.cwl_data.filter_dirty && (now() / 1000) % 2 == 0;
     if edit_mode && edit_off_duration {
         // Stage 2: selecting off duration
         draw_header(d, s.off_duration);
-        let buf = format!("{}h", edit_off_hours);
+        let durations = crate::cwl_data::OFF_DURATIONS_MIN;
+        let idx = (edit_off_idx as usize).min(durations.len() - 1);
+        let buf = crate::cwl_data::format_off_duration(durations[idx]);
         draw_centered(d, &buf, 22);
         draw_small_centered(d, s.hint_rotate_hours, 42);
     } else if edit_mode {
@@ -577,20 +611,30 @@ fn draw_home(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, l
         // Timed off countdown
         draw_header(d, s.manual);
         draw_centered(d, s.level_off, 18);
-        let rem = st.timed_off_remaining_min;
-        let info = format!("{} {}h {}m", s.resumes_in, rem / 60, rem % 60);
+        let info = format!("{} {}",
+            s.resumes_in,
+            crate::cwl_data::format_off_duration(st.timed_off_remaining_min.min(u16::MAX as u32) as u16));
         draw_small_centered(d, &info, 42);
     } else {
         let header = if st.schedule_override { s.manual } else if st.schedule_active { s.scheduled } else { s.ventilation };
         draw_header(d, header);
-        if st.requested_vent_level != st.cwl_data.ventilation_level {
+        if filter_blink_on {
+            draw_centered(d, "Filter", 18);
+        } else if st.requested_vent_level != st.cwl_data.ventilation_level {
             draw_small(d, ">", 0, 22);
             draw_centered(d, level_name(lang, st.requested_vent_level), 18);
         } else {
             draw_centered(d, level_name(lang, st.cwl_data.ventilation_level), 18);
         }
         let mode = if st.requested_bypass_open { s.summer } else { s.winter };
-        let info = format!("{}%  {}", st.cwl_data.relative_ventilation, mode);
+        // Prefer the actual outlet volume (TSP 52,53) since it's far more
+        // useful than a relative %; fall back to % until the TSP scan reaches
+        // those registers (~a few minutes after boot).
+        let info = if st.cwl_data.current_volume > 0 {
+            format!("{} m\u{00B3}/h  {}", st.cwl_data.current_volume, mode)
+        } else {
+            format!("{}%  {}", st.cwl_data.relative_ventilation, mode)
+        };
         draw_small_centered(d, &info, 42);
     }
 }

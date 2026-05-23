@@ -1,7 +1,7 @@
 //! Ventilation and bypass scheduling with manual override and timed-off support.
 
 use std::sync::{Arc, Mutex};
-use log::info;
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 
 use crate::app_state::AppStateInner;
@@ -90,6 +90,7 @@ impl Scheduler {
                 st.schedule_override = false;
                 st.timed_off_end_epoch = 0;
                 st.persist_timed_off = true;
+                st.initial_level_known = true;
             }
         }
 
@@ -146,11 +147,13 @@ impl Scheduler {
                     let level = self.schedules[match_index as usize].vent_level;
                     if level != st.requested_vent_level {
                         st.requested_vent_level = level;
+                        st.initial_level_known = true;
                         info!("Scheduler: Level set to {}", level);
                     }
                 } else if st.schedule_active {
                     st.schedule_active = false;
                     st.requested_vent_level = st.config.ventilation_level;
+                    st.initial_level_known = true;
                     info!("Scheduler: No schedule active, using default");
                 }
             }
@@ -187,20 +190,34 @@ impl Scheduler {
         -1
     }
 
-    pub fn activate_timed_off(&mut self, hours: u8) {
-        if hours == 0 || hours > 99 { return; }
+    pub fn activate_timed_off(&mut self, minutes: u16) {
+        if minutes == 0 { return; }
+
+        // Apply the OFF level immediately, regardless of NTP state, so the
+        // user's selection takes effect even before the clock is synced.
+        // The expiry timer is only set up when we have a real epoch — without
+        // it we'd compare against a clock starting at 1970 and instantly
+        // expire on the next NTP sync.
+        {
+            let mut st = self.state.lock().unwrap();
+            st.requested_vent_level = 0;
+            st.schedule_override = true;
+            st.initial_level_known = true;
+        }
+
         let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
-        if now_epoch < 1_700_000_000 { return; }
+        if now_epoch < 1_700_000_000 {
+            warn!("Scheduler: Off applied without timer (NTP not synced); cancel manually to resume");
+            return;
+        }
 
         self.timed_off_active = true;
-        self.timed_off_end_epoch = now_epoch + (hours as i64) * 3600;
+        self.timed_off_end_epoch = now_epoch + (minutes as i64) * 60;
 
         let mut st = self.state.lock().unwrap();
-        st.requested_vent_level = 0; // Off
-        st.schedule_override = true;
         st.timed_off_end_epoch = self.timed_off_end_epoch;
         st.persist_timed_off = true;
-        info!("Scheduler: Timed off for {}h", hours);
+        info!("Scheduler: Timed off for {} min", minutes);
     }
 
     pub fn cancel_timed_off(&mut self) {

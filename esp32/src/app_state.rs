@@ -16,6 +16,12 @@ pub struct AppStateInner {
     pub requested_vent_level: u8,
     pub requested_bypass_open: bool,
     pub requested_filter_reset: bool,
+    // True once the OT master has either (a) read the CWL's current ventilation
+    // level via ID 77 and mirrored it into requested_vent_level, or (b) the
+    // user explicitly set a level via display / MQTT / web. Until then the OT
+    // master skips the Setpoint (ID 71) WRITE so it doesn't override the unit
+    // with whatever stale value happened to be in config on boot.
+    pub initial_level_known: bool,
 
     // Schedule state
     pub schedule_active: bool,
@@ -42,7 +48,7 @@ pub struct AppStateInner {
     pub simulated: bool,
     pub display_wake_requested: bool,
     pub encoder_action: Option<String>, // "left", "right", "press"
-    pub timed_off_request: Option<u8>,  // hours to activate timed off
+    pub timed_off_request: Option<u16>, // minutes to activate timed off
     pub cancel_timed_off: bool,
     pub persist_timed_off: bool, // flag to save timed-off state to NVS
     pub persist_config: bool,    // flag to save full config to NVS
@@ -57,6 +63,7 @@ impl AppStateInner {
             requested_vent_level,
             requested_bypass_open,
             requested_filter_reset: false,
+            initial_level_known: false,
             schedule_active: false,
             schedule_override: false,
             timed_off_active: false,

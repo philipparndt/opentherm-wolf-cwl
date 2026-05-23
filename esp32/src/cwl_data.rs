@@ -4,6 +4,33 @@
 #[allow(dead_code)]
 pub const TSP_MAX_INDEX: usize = 69;
 
+/// Discrete durations available when the user activates the timed-off feature.
+/// Stored as minutes so the same table covers everything from 15 min up to 2 w
+/// without separate units. The encoder steps through these by index; MQTT
+/// accepts the raw minute value.
+pub const OFF_DURATIONS_MIN: &[u16] = &[
+    15, 30, 45, 60, 90, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720,
+    1440, 2880, 4320, 5760, 7200, 8640, 10080, 20160,
+];
+
+/// Render an off-timer duration (in minutes) using the same labels shown in
+/// the edit-mode UI: 15m, 1h, 1h 30m, 2d, 1w, ...
+pub fn format_off_duration(minutes: u16) -> String {
+    if minutes < 60 {
+        return format!("{}m", minutes);
+    }
+    if minutes < 1440 {
+        let h = minutes / 60;
+        let m = minutes % 60;
+        if m == 0 { return format!("{}h", h); }
+        return format!("{}h {}m", h, m);
+    }
+    if minutes < 10080 || minutes % 10080 != 0 {
+        return format!("{}d", minutes / 1440);
+    }
+    format!("{}w", minutes / 10080)
+}
+
 /// Ventilation levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -101,6 +128,10 @@ pub struct CwlData {
     // Connection state
     pub connected: bool,
     pub last_response_ms: u32,
+    // Counter bumped on every send_request return that observed bus activity
+    // (Success or Invalid framing). Used by the status LED to flash on any
+    // detected slave response, including ones the OT library rejects.
+    pub rx_seen_counter: u32,
 }
 
 impl Default for CwlData {
@@ -147,6 +178,7 @@ impl Default for CwlData {
             frost_status: 0,
             connected: false,
             last_response_ms: 0,
+            rx_seen_counter: 0,
         }
     }
 }

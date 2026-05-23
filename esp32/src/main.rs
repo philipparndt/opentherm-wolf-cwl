@@ -310,6 +310,24 @@ fn main() {
     const NET_CHECK_INTERVAL_MS: u32 = 2000;
     let mut ntp_initialized = false;
 
+    // WiFi init blocks until connected, so by the time we enter the loop the
+    // network is already up and the "disconnected → connected" edge that
+    // normally triggers setup_ntp() never fires. Kick NTP off explicitly here
+    // when we already have a link.
+    if last_net_connected {
+        ntp_initialized = true;
+        network::setup_ntp();
+        network::setup_mdns().ok();
+    }
+
+    // LED RX activity blink: invert the LED briefly when fresh slave activity
+    // is observed (Success or Invalid framing — both bumped by ot_master).
+    // Pulse spans several iterations of the 5 ms inner idle loop so a response
+    // landing mid-window is still visible.
+    let mut last_seen_rx_counter: u32 = 0;
+    let mut rx_pulse_start_ms: u32 = 0;
+    const RX_PULSE_MS: u32 = 300;
+
     loop {
         let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
 
@@ -318,9 +336,9 @@ fn main() {
         // Timed off requests from web/MQTT
         {
             let mut st = state.lock().unwrap();
-            if let Some(hours) = st.timed_off_request.take() {
+            if let Some(minutes) = st.timed_off_request.take() {
                 drop(st);
-                sched.activate_timed_off(hours);
+                sched.activate_timed_off(minutes);
             } else if st.cancel_timed_off {
                 st.cancel_timed_off = false;
                 drop(st);
@@ -361,12 +379,11 @@ fn main() {
 
         // MQTT publishing now runs on its own thread (spawned above).
 
-        // Watchdog
+        // Watchdog (LED state itself is driven from the 5 ms inner loop below
+        // so RX pulses arriving mid-iteration are not missed).
         {
             let st = state.lock().unwrap();
             wdt.update(now_ms, st.cwl_data.last_response_ms, st.cwl_data.connected);
-            // Status LED: on when network + MQTT connected
-            led.set(st.network_connected && st.mqtt_connected);
         }
 
         // Virtual encoder from web UI
@@ -459,6 +476,20 @@ fn main() {
             FreeRtos::delay_ms(5);
             let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
             drain_encoder(&mut enc, &mut disp, now_ms);
+
+            // Drive LED here (every 5 ms) so a fresh RX is reflected in the
+            // pulse window even if it lands between outer-loop iterations.
+            let (rx_counter, net_ok) = {
+                let st = state.lock().unwrap();
+                (st.cwl_data.rx_seen_counter, st.network_connected && st.mqtt_connected)
+            };
+            if rx_counter != last_seen_rx_counter {
+                last_seen_rx_counter = rx_counter;
+                rx_pulse_start_ms = now_ms;
+            }
+            let in_pulse = now_ms.wrapping_sub(rx_pulse_start_ms) < RX_PULSE_MS
+                && rx_pulse_start_ms != 0;
+            led.set(net_ok ^ in_pulse);
         }
     }
 }

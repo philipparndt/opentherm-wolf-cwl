@@ -113,10 +113,18 @@ func Decode(samples []Sample) {
 	}
 	fmt.Printf("Voltage range: %.3f - %.3f V\n", vmin, vmax)
 
-	packets := findPackets(samples, 6.1, 0.005)
+	// Adaptive thresholds derived from the capture's voltage range. Custom
+	// PCBs put the bus floor / slave RSP peak at different absolute levels
+	// than the BM reference, so absolute thresholds (6.1V / 6.5V / 8.0V)
+	// miss weak slave responses. Anchor everything to vmin and vmax instead.
+	vrange := vmax - vmin
+	activityThreshold := vmin + math.Max(0.15, 0.04*vrange)
+	reqPeakThreshold := vmin + 0.5*vrange
+
+	packets := findPackets(samples, activityThreshold, 0.005, reqPeakThreshold)
 	fmt.Printf("Found %d packets\n\n", len(packets))
 
-	analyzeBitTiming(packets)
+	analyzeBitTiming(packets, vmin)
 	fmt.Println()
 
 	fmt.Println("=== OpenTherm Protocol Decode ===")
@@ -129,7 +137,7 @@ func Decode(samples []Sample) {
 		if pkt.IsRequest {
 			kind = "REQ"
 		}
-		rawBits := decodeManchester(pkt)
+		rawBits := decodeManchester(pkt, vmin)
 
 		if len(rawBits) < 34 {
 			fmt.Printf("Packet %2d [%s] t=%.6fs: only %d bits (need 34)\n", i, kind, pkt.StartTime, len(rawBits))
@@ -174,7 +182,7 @@ func Decode(samples []Sample) {
 	}
 }
 
-func findPackets(samples []Sample, activityThreshold, gapThreshold float64) []Packet {
+func findPackets(samples []Sample, activityThreshold, gapThreshold, reqPeakThreshold float64) []Packet {
 	var packets []Packet
 	inPacket := false
 	var startIdx int
@@ -192,7 +200,7 @@ func findPackets(samples []Sample, activityThreshold, gapThreshold float64) []Pa
 				pkt.PeakV = s.Voltage
 			}
 		} else if inPacket && (s.Time-pkt.EndTime) > gapThreshold {
-			pkt.IsRequest = pkt.PeakV > 8.0
+			pkt.IsRequest = pkt.PeakV > reqPeakThreshold
 			margin := int(0.001 / (samples[1].Time - samples[0].Time))
 			lo := startIdx - margin
 			if lo < 0 {
@@ -208,7 +216,7 @@ func findPackets(samples []Sample, activityThreshold, gapThreshold float64) []Pa
 		}
 	}
 	if inPacket {
-		pkt.IsRequest = pkt.PeakV > 8.0
+		pkt.IsRequest = pkt.PeakV > reqPeakThreshold
 		margin := int(0.001 / (samples[1].Time - samples[0].Time))
 		lo := startIdx - margin
 		if lo < 0 {
@@ -239,17 +247,11 @@ func findEdges(samples []Sample, threshold float64, hysteresis float64) []Edge {
 	return edges
 }
 
-func analyzeBitTiming(packets []Packet) {
+func analyzeBitTiming(packets []Packet, vmin float64) {
 	var allPulseWidths []float64
 
 	for _, pkt := range packets {
-		threshold := 6.5
-		hysteresis := 0.3
-		if pkt.IsRequest {
-			threshold = 8.0
-			hysteresis = 0.5
-		}
-
+		threshold, hysteresis := packetThresholds(pkt, vmin)
 		edges := findEdges(pkt.Samples, threshold, hysteresis)
 		for i := 1; i < len(edges); i++ {
 			dt := edges[i].Time - edges[i-1].Time
@@ -305,13 +307,23 @@ func analyzeBitTiming(packets []Packet) {
 		closest, math.Abs(closest-baudRate)/closest*100)
 }
 
-func decodeManchester(pkt Packet) []int {
-	threshold := 6.5
-	hysteresis := 0.3
-	if pkt.IsRequest {
-		threshold = 8.0
-		hysteresis = 0.5
+// packetThresholds returns an edge-detection threshold midway between the
+// global voltage floor (vmin) and this packet's peak, with hysteresis scaled
+// to the packet's amplitude. This keeps slave RSP frames (small swing) and
+// master REQ frames (large swing) both decodable in the same capture without
+// hard-coded voltages, which broke for custom PCBs with different bus levels.
+func packetThresholds(pkt Packet, vmin float64) (float64, float64) {
+	swing := pkt.PeakV - vmin
+	if swing < 0.2 {
+		swing = 0.2
 	}
+	threshold := vmin + 0.5*swing
+	hysteresis := math.Max(0.1, 0.08*swing)
+	return threshold, hysteresis
+}
+
+func decodeManchester(pkt Packet, vmin float64) []int {
+	threshold, hysteresis := packetThresholds(pkt, vmin)
 
 	edges := findEdges(pkt.Samples, threshold, hysteresis)
 	if len(edges) < 2 {

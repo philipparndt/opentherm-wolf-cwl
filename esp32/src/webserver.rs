@@ -181,6 +181,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                     st.requested_vent_level = level as u8;
                     st.config.ventilation_level = level as u8;
                     st.schedule_override = true;
+                    st.initial_level_known = true;
                     return send_ok(req);
                 }
             }

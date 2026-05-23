@@ -2,6 +2,7 @@ package decoder
 
 import (
 	"fmt"
+	"math"
 	"math/bits"
 	"strings"
 )
@@ -292,7 +293,19 @@ type CaptureResult struct {
 
 // ExtractExchanges decodes samples and returns paired exchanges
 func ExtractExchanges(samples []Sample) CaptureResult {
-	packets := findPackets(samples, 6.1, 0.005)
+	vmin, vmax := samples[0].Voltage, samples[0].Voltage
+	for _, s := range samples {
+		if s.Voltage < vmin {
+			vmin = s.Voltage
+		}
+		if s.Voltage > vmax {
+			vmax = s.Voltage
+		}
+	}
+	vrange := vmax - vmin
+	activityThreshold := vmin + math.Max(0.15, 0.04*vrange)
+	reqPeakThreshold := vmin + 0.5*vrange
+	packets := findPackets(samples, activityThreshold, 0.005, reqPeakThreshold)
 
 	type decodedPacket struct {
 		isRequest bool
@@ -304,7 +317,7 @@ func ExtractExchanges(samples []Sample) CaptureResult {
 	var decoded []decodedPacket
 
 	for _, pkt := range packets {
-		rawBits := decodeManchester(pkt)
+		rawBits := decodeManchester(pkt, vmin)
 		if len(rawBits) < 34 {
 			continue
 		}

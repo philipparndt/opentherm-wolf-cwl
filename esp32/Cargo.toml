@@ -5,7 +5,7 @@ edition = "2021"
 resolver = "2"
 
 [features]
-default = ["wifi", "ot-ext", "display-rotate"]
+default = ["wifi", "ot-ext", "display-sh1106"]
 wifi = []
 ethernet = []
 simulate-ot = []

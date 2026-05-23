@@ -114,6 +114,10 @@ bool OpenTherm::sendRequestAync(unsigned long request)
     response = 0;
     responseStatus = OpenThermResponseStatus::NONE;
 
+    // Hold off interrupts/task switches for the whole 34-bit frame so
+    // delayMicroseconds(500) inside sendBit() is not preempted — otherwise
+    // half-bit pulses stretch and the slave drops the frame on parity.
+    noInterrupts();
     sendBit(HIGH); // start bit
     for (int i = 31; i >= 0; i--)
     {
@@ -121,6 +125,7 @@ bool OpenTherm::sendRequestAync(unsigned long request)
     }
     sendBit(HIGH); // stop bit
     setIdleState();
+    interrupts();
 
     status = OpenThermStatus::RESPONSE_WAITING;
     responseTimestamp = micros();
@@ -145,6 +150,7 @@ bool OpenTherm::sendResponse(unsigned long request)
     response = 0;
     responseStatus = OpenThermResponseStatus::NONE;
 
+    noInterrupts();
     sendBit(HIGH); // start bit
     for (int i = 31; i >= 0; i--)
     {
@@ -152,6 +158,7 @@ bool OpenTherm::sendResponse(unsigned long request)
     }
     sendBit(HIGH); // stop bit
     setIdleState();
+    interrupts();
     status = OpenThermStatus::READY;
     return true;
 }
