@@ -35,4 +35,3 @@ strip = true         # strip debug symbols
 
 [build-dependencies]
 embuild = "0.33"
-cc = "1"

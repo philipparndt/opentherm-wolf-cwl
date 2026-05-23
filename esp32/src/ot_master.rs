@@ -39,7 +39,7 @@ enum PollState {
 #[allow(dead_code)]
 pub struct OtMaster {
     #[cfg(not(feature = "simulate-ot"))]
-    ot: crate::opentherm_ffi::OpenTherm,
+    ot: crate::opentherm::OpenTherm,
     state: AppState,
     poll_state: PollState,
     last_poll_ms: u32,
@@ -57,7 +57,7 @@ pub struct OtMaster {
 impl OtMaster {
     #[cfg(not(feature = "simulate-ot"))]
     pub fn new(state: AppState, in_pin: i32, out_pin: i32) -> Result<Self, &'static str> {
-        let ot = crate::opentherm_ffi::OpenTherm::new(in_pin, out_pin)?;
+        let ot = crate::opentherm::OpenTherm::new(in_pin, out_pin)?;
         info!("OpenTherm: Initialized (IN={}, OUT={})", in_pin, out_pin);
         Ok(Self {
             ot,
@@ -131,7 +131,7 @@ impl OtMaster {
 
     #[cfg(not(feature = "simulate-ot"))]
     fn poll_cycle(&mut self, now_ms: u32) {
-        use crate::opentherm_ffi::{MessageType, OpenTherm, ResponseStatus};
+        use crate::opentherm::{MessageType, OpenTherm, ResponseStatus};
 
         // Probe additional IDs once connected
         if !self.probe_complete {
@@ -418,7 +418,7 @@ impl OtMaster {
 
     #[cfg(not(feature = "simulate-ot"))]
     fn probe_additional_ids(&mut self) {
-        use crate::opentherm_ffi::{MessageType, OpenTherm, ResponseStatus};
+        use crate::opentherm::{MessageType, OpenTherm, ResponseStatus};
 
         info!("OpenTherm: Probing additional data IDs...");
 
