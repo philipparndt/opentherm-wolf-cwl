@@ -8,8 +8,7 @@ mod framebuffer;
 pub mod i18n;
 mod mqtt;
 mod network;
-#[cfg(not(feature = "simulate-ot"))]
-mod opentherm_ffi;
+mod opentherm;
 mod ot_master;
 mod scheduler;
 mod status_led;
