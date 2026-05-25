@@ -82,3 +82,12 @@ pcb/cwl-diyless/.history
 pcb/cwl-diyless/cwl-gerber.zip
 .idea
 out
+pcb/cwl-compact/cwl-backups
+pcb/cwl-compact/.history
+*.zip
+pcb/cwl-compact/gerber
+pcb/cwl-esp-onboard/gerber
+pcb/cwl-esp-onboard/.history
+pcb/cwl-diyless/.history
+pcb/cwl-esp-onboard/.history
+pcb/cwl-esp-onboard/.history

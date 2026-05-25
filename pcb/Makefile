@@ -12,6 +12,7 @@ KICAD_CLI := kicad-cli
 # VARIANT picks which KiCad project to act on. Default cwl/ uses the combined
 # OLED footprint (supports both 0.96" and 1.3" modules). cwl-diyless/ uses the
 # DIYless D1-mini OT shield and has separate J3 / J3B for the two OLED sizes.
+# cwl-compact/ shares the cwl schematic but uses a more compact board layout.
 VARIANT ?= cwl
 KICAD_PROJECT := $(VARIANT)/cwl.kicad_pcb
 FREECADCMD := /Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd
@@ -27,7 +28,7 @@ export KICAD9_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSuppor
 export KICAD_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
 export KICAD10_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
 
-.PHONY: generate-3d export-stl-full export-stl-board export-stl-parts export-stl-parts-0.96 export-stl-parts-1.3 export-stl-print gerber plot-pdf ibom clean setup-3d help
+.PHONY: generate-3d export-stl-full export-stl-board export-stl-parts export-stl-parts-0.96 export-stl-parts-1.3 export-stl-print gerber plot-pdf pcba ibom clean setup-3d help
 
 help:
 	@echo "Wolf CWL Shield PCB"
@@ -41,11 +42,13 @@ help:
 	@echo "  make export-stl-parts-1.3  - Export components only with 1.3\" OLED  (cwl-diyless only — excludes J3)"
 	@echo "  make gerber           - Export Gerbers + drill files for fabrication"
 	@echo "  make plot-pdf         - Plot fabrication / assembly PDFs (front + back)"
+	@echo "  make pcba             - Export JLCPCB PCBA bundle (gerber + BOM + CPL)"
 	@echo "  make ibom             - Generate Interactive HTML BOM (needs InteractiveHtmlBom plugin via PCM)"
 	@echo "  make clean            - Remove generated files and venv"
 	@echo ""
 	@echo "  Variants:"
 	@echo "    VARIANT=cwl         — main board (combined 0.96\" + 1.3\" OLED footprint, on-board OT) [default]"
+	@echo "    VARIANT=cwl-compact — compact board layout (same schematic as cwl)"
 	@echo "    VARIANT=cwl-diyless — DIYless D1-mini OT shield + two separate OLED footprints"
 
 setup-3d: $(VENV_3D)/bin/activate
@@ -158,6 +161,50 @@ plot-pdf:
 	@echo "Exported: $(VARIANT)/plot/cwl-assembly-front.pdf"
 	@echo "Exported: $(VARIANT)/plot/cwl-assembly-back.pdf"
 
+# JLCPCB PCBA bundle (SMD parts only — through-hole parts are hand-assembled).
+# Produces in $(VARIANT)/pcba/:
+#   cwl-bom.csv      — JLCPCB-format BOM (Comment, Designator, Footprint, LCSC Part #)
+#   cwl-cpl.csv      — JLCPCB-format pick & place (Designator, Mid X, Mid Y, Layer, Rotation)
+#   cwl-gerber.zip   — copied from the gerber target
+# Add an "LCSC" field to each SMD schematic symbol with its LCSC part number so
+# the BOM's LCSC Part # column is populated. DNP and through-hole parts are
+# excluded from both BOM and CPL.
+pcba: gerber
+	@echo "Exporting JLCPCB PCBA files (SMD only — THT assembled by hand)..."
+	@mkdir -p $(VARIANT)/pcba
+	$(KICAD_CLI) pcb export pos \
+		--format csv \
+		--units mm \
+		--use-drill-file-origin \
+		--side both \
+		--exclude-fp-th \
+		--exclude-dnp \
+		-o $(VARIANT)/pcba/cwl-cpl-raw.csv \
+		$(KICAD_PROJECT)
+	@awk -F',' 'BEGIN{OFS=","} \
+		NR==1 {print "Designator,Mid X,Mid Y,Layer,Rotation"; next} \
+		{print $$1, $$4, $$5, $$7, $$6}' \
+		$(VARIANT)/pcba/cwl-cpl-raw.csv > $(VARIANT)/pcba/cwl-cpl.csv
+	@rm -f $(VARIANT)/pcba/cwl-cpl-raw.csv
+	$(KICAD_CLI) sch export bom \
+		--fields "Value,Reference,Footprint,LCSC" \
+		--labels "Comment,Designator,Footprint,LCSC Part #" \
+		--exclude-dnp \
+		-o $(VARIANT)/pcba/cwl-bom-raw.csv \
+		$(VARIANT)/cwl.kicad_sch
+	@# Keep only BOM rows whose Designator appears in the CPL (i.e. SMD parts).
+	@tail -n +2 $(VARIANT)/pcba/cwl-cpl.csv | cut -d',' -f1 | tr -d '"' | sort -u > $(VARIANT)/pcba/.smd-refs
+	@awk -F',' 'NR==FNR {smd[$$1]=1; next} \
+		FNR==1 {print; next} \
+		{ref=$$2; gsub(/"/, "", ref); if (ref in smd) print}' \
+		$(VARIANT)/pcba/.smd-refs $(VARIANT)/pcba/cwl-bom-raw.csv \
+		> $(VARIANT)/pcba/cwl-bom.csv
+	@rm -f $(VARIANT)/pcba/cwl-bom-raw.csv $(VARIANT)/pcba/.smd-refs
+	@cp $(VARIANT)/cwl-gerber.zip $(VARIANT)/pcba/
+	@echo "Exported: $(VARIANT)/pcba/cwl-bom.csv"
+	@echo "Exported: $(VARIANT)/pcba/cwl-cpl.csv"
+	@echo "Exported: $(VARIANT)/pcba/cwl-gerber.zip"
+
 ibom:
 	@echo "Generating Interactive HTML BOM..."
 	@if [ ! -f "$(IBOM_SCRIPT)" ]; then \
@@ -180,5 +227,5 @@ clean:
 	rm -f $(VARIANT)/cwl-assembly.stl $(VARIANT)/cwl-board.stl $(VARIANT)/cwl-parts.stl $(VARIANT)/cwl-parts-0.96.stl $(VARIANT)/cwl-parts-1.3.stl
 	rm -f $(VARIANT)/cwl-assembly.step $(VARIANT)/cwl-board.step $(VARIANT)/cwl-parts.step $(VARIANT)/cwl-parts-0.96.step $(VARIANT)/cwl-parts-1.3.step
 	rm -rf $(VARIANT)/gerber $(VARIANT)/cwl-gerber.zip
-	rm -rf $(VARIANT)/plot $(VARIANT)/bom
+	rm -rf $(VARIANT)/plot $(VARIANT)/bom $(VARIANT)/pcba
 	rm -rf __pycache__
