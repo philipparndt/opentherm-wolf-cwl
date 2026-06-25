@@ -144,6 +144,38 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         }
         let st = s.lock().unwrap();
         let d = &st.cwl_data;
+
+        // Humidity sensors + derived psychrometrics for the decision explainer.
+        let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
+        let inp = crate::humidity::inputs(
+            &st, now_ms, st.cwl_data.exhaust_inlet_temp, st.cwl_data.supply_inlet_temp);
+        let mut sensors: Vec<serde_json::Value> = Vec::new();
+        for (topic, sm) in st.humidity_inside.iter() {
+            sensors.push(json!({
+                "topic": topic, "role": "indoor",
+                "humidity": sm.humidity, "temperature": sm.temperature, "pressure": sm.pressure,
+                "fresh": crate::humidity::is_fresh(sm.updated_ms, now_ms),
+            }));
+        }
+        if let Some(sm) = st.humidity_outside.as_ref() {
+            sensors.push(json!({
+                "topic": st.config.humidity_outside_topic, "role": "outdoor",
+                "humidity": sm.humidity, "temperature": sm.temperature, "pressure": sm.pressure,
+                "fresh": crate::humidity::is_fresh(sm.updated_ms, now_ms),
+            }));
+        }
+        let hum_json = json!({
+            "active": inp.is_some(),
+            "ambientPressureKpa": st.ambient_pressure_kpa,
+            "indoorRh": inp.as_ref().map(|i| i.indoor.rh),
+            "outdoorRh": inp.as_ref().map(|i| i.outdoor.rh),
+            "indoorAh": inp.as_ref().map(|i| i.indoor.ah),
+            "outdoorAh": inp.as_ref().map(|i| i.outdoor.ah),
+            "indoorEnthalpy": inp.as_ref().map(|i| i.indoor.h),
+            "outdoorEnthalpy": inp.as_ref().map(|i| i.outdoor.h),
+            "sensors": sensors,
+        });
+
         let body = json!({
             "ventilation": {
                 "level": d.ventilation_level,
@@ -170,6 +202,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "mqttConnected": st.mqtt_connected,
                 "wifiRssi": 0,
                 "simulated": st.simulated,
+                "lastPanic": crate::panic_capture::last_panic(),
             },
             "timedOff": {
                 "active": st.timed_off_active,
@@ -179,7 +212,11 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "enabled": st.config.extreme_heat_enabled,
                 "currentLevel": st.eh_current_level,
                 "lastChangeEpoch": st.eh_last_change_epoch,
+                "reason": st.eh_current_reason.as_str(),
+                "protectionEnabled": st.config.humidity_protection_enabled,
+                "protectionActive": st.protection_active,
             },
+            "humidity": hum_json,
             "airflow": {
                 "reduced": if d.tsp_valid[0] && d.tsp_valid[1] { (d.tsp_values[0] as u32) | ((d.tsp_values[1] as u32) << 8) } else { 100 },
                 "normal": if d.tsp_valid[2] && d.tsp_valid[3] { (d.tsp_values[2] as u32) | ((d.tsp_values[3] as u32) << 8) } else { 130 },
@@ -204,6 +241,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                     st.config.ventilation_level = level as u8;
                     st.schedule_override = true;
                     st.initial_level_known = true;
+                    st.push_history_marker_now(level as u8, crate::app_state::Reason::Manual);
                     return send_ok(req);
                 }
             }
@@ -284,6 +322,11 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
             "extremeHeat": {
                 "enabled": c.extreme_heat_enabled,
             },
+            "humidity": {
+                "insideTopics": c.humidity_inside_topics,
+                "outsideTopic": c.humidity_outside_topic,
+                "protectionEnabled": c.humidity_protection_enabled,
+            },
             "configured": c.configured,
             "language": c.language.code(),
         });
@@ -342,6 +385,22 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                     st.persist_config = true;
                 }
             }
+            // Humidity sensors + moisture-protection toggle.
+            if let Some(h) = val.get("humidity") {
+                if let Some(arr) = h["insideTopics"].as_array() {
+                    st.config.humidity_inside_topics =
+                        arr.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect();
+                    st.persist_config = true;
+                }
+                if let Some(v) = h["outsideTopic"].as_str() {
+                    st.config.humidity_outside_topic = v.to_string();
+                    st.persist_config = true;
+                }
+                if let Some(v) = h["protectionEnabled"].as_bool() {
+                    st.config.humidity_protection_enabled = v;
+                    st.persist_config = true;
+                }
+            }
             if let Some(v) = val["configured"].as_bool() { st.config.configured = v; }
             if let Some(v) = val["language"].as_str() { st.config.language = Language::from_code(v); }
             info!("Config updated via POST /api/config");
@@ -389,6 +448,11 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 },
                 "extremeHeat": {
                     "enabled": c.extreme_heat_enabled,
+                },
+                "humidity": {
+                    "insideTopics": c.humidity_inside_topics,
+                    "outsideTopic": c.humidity_outside_topic,
+                    "protectionEnabled": c.humidity_protection_enabled,
                 },
                 "configured": c.configured,
             },
@@ -442,6 +506,14 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 }
                 if let Some(eh) = cfg.get("extremeHeat") {
                     if let Some(v) = eh["enabled"].as_bool() { st.config.extreme_heat_enabled = v; }
+                }
+                if let Some(h) = cfg.get("humidity") {
+                    if let Some(arr) = h["insideTopics"].as_array() {
+                        st.config.humidity_inside_topics =
+                            arr.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect();
+                    }
+                    if let Some(v) = h["outsideTopic"].as_str() { st.config.humidity_outside_topic = v.to_string(); }
+                    if let Some(v) = h["protectionEnabled"].as_bool() { st.config.humidity_protection_enabled = v; }
                 }
                 st.config.configured = true;
             }
@@ -522,9 +594,22 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     })?;
 
     // --- POST /api/ota/upload (firmware OTA) ---
+    let s = state.clone();
     server.fn_handler("/api/ota/upload", Method::Post, move |mut req| -> HandlerResult {
         if !is_authenticated(&req) { return send_unauthorized(req); }
         use esp_idf_svc::sys::*;
+
+        // Flush RAM-only state (temperature history + extreme-heat markers) to
+        // the broker (retained) before we reboot into the new image. The MQTT
+        // thread polls these flags every 100 ms and the upload below streams for
+        // several seconds, so the freshest snapshot is persisted well before
+        // esp_restart() — letting the new firmware recover it on boot instead of
+        // starting empty.
+        {
+            let mut st = s.lock().unwrap();
+            st.mqtt_publish_history = true;
+            st.mqtt_publish_extreme_heat = true;
+        }
 
         let mut ota_handle: esp_ota_handle_t = 0;
         let update_partition = unsafe { esp_ota_get_next_update_partition(std::ptr::null()) };
@@ -672,33 +757,65 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         if !is_authenticated(&req) { return send_unauthorized(req); }
         let st = s.lock().unwrap();
         let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
-        let h = &st.temp_history;
 
-        // Oldest → newest, one entry per bucket. null = bucket not yet sampled.
-        let bucket_json = |b: Option<crate::history::Bucket>| match b {
-            Some(b) => json!({ "min": b.min, "max": b.max }),
-            None => serde_json::Value::Null,
-        };
-        let mut supply = Vec::with_capacity(crate::history::HISTORY_SLOTS);
-        let mut exhaust = Vec::with_capacity(crate::history::HISTORY_SLOTS);
-        for col in 0..crate::history::HISTORY_SLOTS {
-            supply.push(bucket_json(h.outdoor.slot_at_column(col)));
-            exhaust.push(bucket_json(h.indoor.slot_at_column(col)));
+        // Build the change-event marker array as a string. The (large) supply /
+        // exhaust arrays are serialized by TempHistory::full_json directly to a
+        // String — at 1440 buckets a serde value tree would be too memory-heavy.
+        let mut events = String::from("[");
+        for (i, e) in st.eh_events.iter().enumerate() {
+            if i > 0 { events.push(','); }
+            events.push_str(&format!(
+                "{{\"epoch\":{},\"level\":{},\"reason\":\"{}\"}}",
+                e.epoch, e.level, e.reason.as_str()
+            ));
         }
-        let events: Vec<_> = st.eh_events.iter()
-            .map(|e| json!({ "epoch": e.epoch, "level": e.level }))
-            .collect();
+        events.push(']');
 
-        let body = json!({
-            "slots": crate::history::HISTORY_SLOTS,
-            "bucketMs": crate::history::BUCKET_MS,
-            "nowEpoch": now_epoch,
-            "supply": supply,
-            "exhaust": exhaust,
-            "events": events,
-        });
+        let body = st.temp_history.full_json(now_epoch, &events);
         drop(st);
-        send_json_body(req, &body.to_string())
+        send_json_body(req, &body)
+    })?;
+
+    // --- GET /api/history/backup (compact restore-format snapshot, downloadable) ---
+    // Same payload the device persists to MQTT, but fetched over HTTP so it can be
+    // saved off-device and re-applied via /api/history/restore — independent of the
+    // broker.
+    let s = state.clone();
+    server.fn_handler("/api/history/backup", Method::Get, move |req| -> HandlerResult {
+        if !is_authenticated(&req) { return send_unauthorized(req); }
+        let st = s.lock().unwrap();
+        let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
+        let body = st.temp_history.snapshot_json(now_epoch);
+        drop(st);
+        send_json_body(req, &body)
+    })?;
+
+    // --- POST /api/history/restore (load a snapshot from /api/history/backup) ---
+    let s = state.clone();
+    server.fn_handler("/api/history/restore", Method::Post, move |mut req| -> HandlerResult {
+        if !is_authenticated(&req) { return send_unauthorized(req); }
+        let body = read_body(&mut req);
+        let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
+        // Points are re-binned relative to "now", so the clock must be valid.
+        if now_epoch < 1_700_000_000 {
+            let mut resp = req.into_response(503, None, &[("Content-Type", "application/json")])?;
+            resp.write_all(b"{\"error\":\"clock not synced yet\"}")?;
+            return Ok(());
+        }
+        let ok = {
+            let mut st = s.lock().unwrap();
+            let applied = st.temp_history.restore_from_snapshot(&body, now_epoch);
+            // Push the restored history straight back to the broker as the new
+            // retained copy so it survives the next reboot.
+            if applied { st.mqtt_publish_history = true; }
+            applied
+        };
+        if ok {
+            return send_ok(req);
+        }
+        let mut resp = req.into_response(400, None, &[("Content-Type", "application/json")])?;
+        resp.write_all(b"{\"error\":\"could not parse snapshot\"}")?;
+        Ok(())
     })?;
 
     // --- Static file serving (web UI from SPIFFS) ---

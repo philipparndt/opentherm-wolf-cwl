@@ -65,6 +65,12 @@ impl ConfigManager {
         config.bypass_open = self.get_bool("bypass_open", false);
         config.extreme_heat_enabled = self.get_bool("eh_enabled", false);
 
+        // Humidity sensors / moisture protection
+        config.humidity_inside_topics =
+            serde_json::from_str(&self.get_string("hum_in_topics", "[]")).unwrap_or_default();
+        config.humidity_outside_topic = self.get_string("hum_out_topic", "");
+        config.humidity_protection_enabled = self.get_bool("hum_protect", false);
+
         // Language
         config.language = Language::from_u8(self.get_i32("language", 0) as u8);
 
@@ -104,6 +110,12 @@ impl ConfigManager {
         self.set_i32("vent_level", config.ventilation_level as i32)?;
         self.set_bool("bypass_open", config.bypass_open)?;
         self.set_bool("eh_enabled", config.extreme_heat_enabled)?;
+
+        // Humidity sensors / moisture protection
+        let in_topics = serde_json::to_string(&config.humidity_inside_topics).unwrap_or_else(|_| "[]".into());
+        self.set_string("hum_in_topics", &in_topics)?;
+        self.set_string("hum_out_topic", &config.humidity_outside_topic)?;
+        self.set_bool("hum_protect", config.humidity_protection_enabled)?;
 
         // Language
         self.set_i32("language", config.language as i32)?;

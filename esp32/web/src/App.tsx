@@ -407,16 +407,28 @@ function ScheduleDialog({ entry, onSave, onCancel }: { entry: ScheduleEntry; onS
   )
 }
 
-function SchedulesTab({ airflow, lang }: { airflow?: { reduced: number; normal: number; party: number }; lang: Lang }) {
+function SchedulesTab({ status, airflow, lang, onRefresh }: { status: Status | null; airflow?: { reduced: number; normal: number; party: number }; lang: Lang; onRefresh?: () => void }) {
   const [entries, setEntries] = useState<ScheduleEntry[]>([])
   const [bypass, setBypass] = useState<BypassScheduleData>({ enabled: false, startDay: 15, startMonth: 4, endDay: 30, endMonth: 9 })
   const [msg, setMsg] = useState<{ type: string; text: string } | null>(null)
   const [editIdx, setEditIdx] = useState<number | null>(null)
+  const [ehEnabled, setEhEnabled] = useState(false)
 
   useEffect(() => {
     getSchedules().then(setEntries)
     getBypassSchedule().then(setBypass)
   }, [])
+
+  // Reflect the persisted extreme-heat state as it arrives via polling.
+  useEffect(() => {
+    if (status?.extremeHeat) setEhEnabled(status.extremeHeat.enabled)
+  }, [status?.extremeHeat?.enabled])
+
+  const toggleExtremeHeat = async (v: boolean) => {
+    setEhEnabled(v) // optimistic; next poll confirms
+    await saveConfig({ extremeHeat: { enabled: v } })
+    onRefresh?.()
+  }
 
   const handleDialogSave = (entry: ScheduleEntry) => {
     if (editIdx !== null && editIdx < entries.length) {
@@ -444,6 +456,21 @@ function SchedulesTab({ airflow, lang }: { airflow?: { reduced: number; normal: 
     <>
       {msg && <div class={`msg ${msg.type}`}>{msg.text}</div>}
 
+      <div class="card">
+        <h3>{t(lang).extremeHeatMode}</h3>
+        <div class="toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" checked={ehEnabled} onChange={(e) => toggleExtremeHeat((e.target as HTMLInputElement).checked)} />
+            <span class="toggle-slider" />
+          </label>
+          <span>{ehEnabled ? 'On' : 'Off'}</span>
+        </div>
+        <p style="font-size:0.8em;color:var(--text-muted);margin-top:8px">{t(lang).extremeHeatHint}</p>
+      </div>
+
+      {ehEnabled && <div class="msg warning">{t(lang).extremeHeatOverridesSchedules}</div>}
+
+      <div style={ehEnabled ? 'opacity:0.45;pointer-events:none' : ''} aria-disabled={ehEnabled}>
       <h2>{t(lang).ventilationSchedules}</h2>
       <WeekTimeline entries={entries} airflow={airflow} onEntriesChange={setEntries} />
       {(() => {
@@ -481,6 +508,7 @@ function SchedulesTab({ airflow, lang }: { airflow?: { reduced: number; normal: 
         ))
       })()}
       {entries.length < 16 && <button onClick={() => setEditIdx(entries.length)} style="margin-bottom:16px">{t(lang).addSchedule}</button>}
+      </div>
 
       {editIdx !== null && (
         <ScheduleDialog
@@ -533,6 +561,10 @@ function SettingsTab({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lan
     setConfig({ ...config, [section]: { ...(config as unknown as Record<string, Record<string, unknown>>)[section], [field]: value } } as Config)
   }
 
+  const hum = config.humidity ?? { insideTopics: [], outsideTopic: '', protectionEnabled: false }
+  const setHum = (h: { insideTopics: string[]; outsideTopic: string; protectionEnabled: boolean }) =>
+    setConfig({ ...config, humidity: h })
+
   return (
     <>
       {msg && <div class={`msg ${msg.type}`}>{msg.text}</div>}
@@ -570,6 +602,23 @@ function SettingsTab({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lan
           <label>Password</label>
           <input type="password" value={config.mqtt.password} onInput={(e) => update('mqtt', 'password', (e.target as HTMLInputElement).value)} />
         </>}
+      </div>
+      <div class="card">
+        <h3>{t(lang).humiditySensors}</h3>
+        <p style="font-size:0.85em;color:var(--text-muted);margin-bottom:8px">{t(lang).humiditySensorsHint}</p>
+        <Toggle checked={hum.protectionEnabled} onChange={(v) => setHum({ ...hum, protectionEnabled: v })} label={t(lang).moistureProtection} />
+        <label style="margin-top:10px;display:block">{t(lang).outdoorSensorTopic}</label>
+        <input type="text" value={hum.outsideTopic} placeholder="garden/weather/indoor_dht"
+          onInput={(e) => setHum({ ...hum, outsideTopic: (e.target as HTMLInputElement).value })} />
+        <label style="margin-top:10px;display:block">{t(lang).indoorSensorTopics}</label>
+        {hum.insideTopics.map((topic, i) => (
+          <div style="display:flex;gap:6px;margin-bottom:4px">
+            <input type="text" value={topic} placeholder="zigbee2mqtt/og_temp_bad" style="flex:1"
+              onInput={(e) => { const arr = [...hum.insideTopics]; arr[i] = (e.target as HTMLInputElement).value; setHum({ ...hum, insideTopics: arr }) }} />
+            <button class="danger" style="padding:6px 10px;margin:0" onClick={() => setHum({ ...hum, insideTopics: hum.insideTopics.filter((_, j) => j !== i) })}>✕</button>
+          </div>
+        ))}
+        <button style="padding:6px 12px;font-size:0.85em" onClick={() => setHum({ ...hum, insideTopics: [...hum.insideTopics, ''] })}>{t(lang).addIndoorSensor}</button>
       </div>
       <div class="card">
         <h3>Web UI</h3>
@@ -644,6 +693,19 @@ function SystemTab({ status, lang }: { status: Status | null; lang: Lang }) {
   )
 }
 
+function DebugTab() {
+  return (
+    <>
+      <OledMirror />
+      <div class="encoder-bar">
+        <button class="enc-btn" onClick={() => sendEncoderAction('left')}>&#9664; Left</button>
+        <button class="enc-btn press" onClick={() => sendEncoderAction('press')}>Press</button>
+        <button class="enc-btn" onClick={() => sendEncoderAction('right')}>Right &#9654;</button>
+      </div>
+    </>
+  )
+}
+
 export function App() {
   const [authenticated, setAuthenticated] = useState(false)
   const [tab, setTab] = useState(0)
@@ -682,19 +744,13 @@ export function App() {
         <div class={`tab ${tab === 1 ? 'active' : ''}`} onClick={() => setTab(1)}>{t(lang).schedules}</div>
         <div class={`tab ${tab === 2 ? 'active' : ''}`} onClick={() => setTab(2)}>{t(lang).settings}</div>
         <div class={`tab ${tab === 3 ? 'active' : ''}`} onClick={() => setTab(3)}>{t(lang).system}</div>
+        <div class={`tab ${tab === 4 ? 'active' : ''}`} onClick={() => setTab(4)}>{t(lang).debug}</div>
       </div>
       {tab === 0 && <StatusTab status={status} lang={lang} onLevelChange={async (level) => { setPendingAction(true); await setVentilationLevel(level) }} onCancelOff={async () => { await cancelTimedOff(); refreshStatus() }} onConfirmed={() => setPendingAction(false)} />}
-      {tab === 1 && <SchedulesTab airflow={status?.airflow} lang={lang} />}
+      {tab === 1 && <SchedulesTab status={status} airflow={status?.airflow} lang={lang} onRefresh={refreshStatus} />}
       {tab === 2 && <SettingsTab lang={lang} onLangChange={setLang} />}
       {tab === 3 && <SystemTab status={status} lang={lang} />}
-
-      <OledMirror />
-
-      <div class="encoder-bar">
-        <button class="enc-btn" onClick={() => sendEncoderAction('left')}>&#9664; Left</button>
-        <button class="enc-btn press" onClick={() => sendEncoderAction('press')}>Press</button>
-        <button class="enc-btn" onClick={() => sendEncoderAction('right')}>Right &#9654;</button>
-      </div>
+      {tab === 4 && <DebugTab />}
     </div>
   )
 }

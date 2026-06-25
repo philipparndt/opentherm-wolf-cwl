@@ -152,11 +152,16 @@ impl Scheduler {
                     if level != st.requested_vent_level {
                         st.requested_vent_level = level;
                         st.initial_level_known = true;
+                        st.push_history_marker_now(level, crate::app_state::Reason::Schedule);
                         info!("Scheduler: Level set to {}", level);
                     }
                 } else if st.schedule_active {
                     st.schedule_active = false;
-                    st.requested_vent_level = st.config.ventilation_level;
+                    let level = st.config.ventilation_level;
+                    if level != st.requested_vent_level {
+                        st.requested_vent_level = level;
+                        st.push_history_marker_now(level, crate::app_state::Reason::Schedule);
+                    }
                     st.initial_level_known = true;
                     info!("Scheduler: No schedule active, using default");
                 }

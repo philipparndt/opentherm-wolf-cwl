@@ -10,7 +10,8 @@ function makeStatus(level: number, requestedLevel?: number): Status {
     status: { fault: false, filter: false, bypass: false, connected: true },
     system: { uptime: 100, freeHeap: 200000, version: 'test', mqttConnected: true, wifiRssi: -50, simulated: false },
     timedOff: { active: false, remainingMinutes: 0 },
-    extremeHeat: { enabled: false, currentLevel: level, lastChangeEpoch: 0 },
+    extremeHeat: { enabled: false, currentLevel: level, lastChangeEpoch: 0, reason: 'temp', protectionEnabled: false, protectionActive: false },
+    humidity: { active: false, ambientPressureKpa: 101.3, indoorRh: null, outdoorRh: null, indoorAh: null, outdoorAh: null, indoorEnthalpy: null, outdoorEnthalpy: null, sensors: [] },
     airflow: { reduced: 100, normal: 130, party: 195 },
   }
 }

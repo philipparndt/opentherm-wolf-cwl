@@ -7,11 +7,14 @@ mod encoder;
 mod extreme_heat;
 mod framebuffer;
 mod history;
+mod humidity;
 pub mod i18n;
 mod mqtt;
 mod network;
 mod opentherm;
 mod ot_master;
+mod panic_capture;
+mod psychro;
 mod scheduler;
 mod status_led;
 mod watchdog;
@@ -74,6 +77,13 @@ fn drain_encoder(
 
 fn main() {
     esp_idf_svc::log::EspLogger::initialize_default();
+
+    // Capture future panics (message + file:line) across the reboot they cause,
+    // then surface any panic from the previous run.
+    panic_capture::install_hook();
+    if let Some(p) = panic_capture::load() {
+        log::error!("Recovered from previous panic: {p}");
+    }
 
     info!("Wolf CWL - Rust Firmware");
     info!("Initializing...");
@@ -333,6 +343,10 @@ fn main() {
     let mut rx_pulse_start_ms: u32 = 0;
     const RX_PULSE_MS: u32 = 300;
 
+    // One-shot: record a "reboot" history marker once the clock is valid and any
+    // retained markers have been restored (so it appends rather than being wiped).
+    let mut reboot_marked = false;
+
     loop {
         let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
 
@@ -423,24 +437,50 @@ fn main() {
                 // Persist the rolled-over history to the broker (retained).
                 st.mqtt_publish_history = true;
             }
+            // Coarse humidity history: max fresh indoor RH + fresh outdoor RH.
+            let indoor_rh = st.humidity_inside.values()
+                .filter(|s| humidity::is_fresh(s.updated_ms, now_ms))
+                .map(|s| s.humidity)
+                .fold(None, |acc: Option<f32>, h| Some(acc.map_or(h, |a| a.max(h))));
+            let outdoor_rh = st.humidity_outside
+                .filter(|s| humidity::is_fresh(s.updated_ms, now_ms))
+                .map(|s| s.humidity);
+            st.temp_history.sample_humidity(now_ms, indoor_rh, outdoor_rh);
         }
 
         // Apply any RAM-only state recovered from retained MQTT snapshots. The
         // MQTT callback only stashes raw bytes; the heavier JSON parse happens
         // here on the main loop.
+        //
+        // Crucially, wait until the wall clock is valid (NTP synced): the history
+        // snapshot re-bins each point by its epoch relative to "now", so restoring
+        // against a 1970 clock maps every point out of range and silently drops
+        // the whole history. MQTT often delivers the retained snapshot before NTP
+        // finishes (notably on Ethernet), so we leave the bytes *pending* — not
+        // taken — until the clock is good, then restore on a later iteration.
         {
-            let mut st = state.lock().unwrap();
-            if let Some(bytes) = st.pending_history_json.take() {
-                let st = &mut *st;
-                if st.temp_history.restore_from_snapshot(&bytes) {
-                    display_dirty.store(true, Ordering::Relaxed);
-                    info!("MQTT recovery: temperature history restored");
+            let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
+            if now_epoch >= 1_700_000_000 {
+                let mut st = state.lock().unwrap();
+                if let Some(bytes) = st.pending_history_json.take() {
+                    let st = &mut *st;
+                    if st.temp_history.restore_from_snapshot(&bytes, now_epoch) {
+                        display_dirty.store(true, Ordering::Relaxed);
+                        info!("MQTT recovery: temperature history restored");
+                    }
                 }
-            }
-            if let Some(bytes) = st.pending_extreme_heat_json.take() {
-                let st = &mut *st;
-                extreme_heat::restore_snapshot(st, &bytes);
-                info!("MQTT recovery: extreme-heat markers restored");
+                if let Some(bytes) = st.pending_extreme_heat_json.take() {
+                    let st = &mut *st;
+                    extreme_heat::restore_snapshot(st, &bytes);
+                    info!("MQTT recovery: extreme-heat markers restored");
+                }
+                // Mark the reboot once, after any retained markers were restored
+                // (restore replaces the event list, so this must come after it).
+                if !reboot_marked {
+                    reboot_marked = true;
+                    let level = st.requested_vent_level;
+                    st.push_history_marker_now(level, crate::app_state::Reason::Reboot);
+                }
             }
         }
 

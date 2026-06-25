@@ -1,10 +1,32 @@
+export interface SensorReading {
+  topic: string
+  role: 'indoor' | 'outdoor'
+  humidity: number
+  temperature: number | null
+  pressure: number | null
+  fresh: boolean
+}
+
+export interface HumidityStatus {
+  active: boolean
+  ambientPressureKpa: number
+  indoorRh: number | null
+  outdoorRh: number | null
+  indoorAh: number | null
+  outdoorAh: number | null
+  indoorEnthalpy: number | null
+  outdoorEnthalpy: number | null
+  sensors: SensorReading[]
+}
+
 export interface Status {
   ventilation: { level: number; levelName: string; relative: number; requestedLevel: number; scheduleActive: boolean; override: boolean }
   temperature: { supplyInlet: number; exhaustInlet: number }
   status: { fault: boolean; filter: boolean; bypass: boolean; connected: boolean }
   system: { uptime: number; freeHeap: number; version: string; mqttConnected: boolean; wifiRssi: number; simulated: boolean }
   timedOff: { active: boolean; remainingMinutes: number }
-  extremeHeat: { enabled: boolean; currentLevel: number; lastChangeEpoch: number }
+  extremeHeat: { enabled: boolean; currentLevel: number; lastChangeEpoch: number; reason: string; protectionEnabled: boolean; protectionActive: boolean }
+  humidity: HumidityStatus
   airflow: { reduced: number; normal: number; party: number }
 }
 
@@ -14,18 +36,23 @@ export interface Config {
   web: { username: string; password: string }
   pins: { otIn: number; otOut: number; sda: number; scl: number; encClk: number; encDt: number; encSw: number }
   extremeHeat?: { enabled: boolean }
+  humidity?: { insideTopics: string[]; outsideTopic: string; protectionEnabled: boolean }
   configured: boolean
   language?: string
 }
 
-export interface HistoryBucket { min: number; max: number }
-export interface HeatEvent { epoch: number; level: number }
+export type HistoryBucket = [number, number] // compact [min, max]
+export interface HeatEvent { epoch: number; level: number; reason: string }
 export interface History {
   slots: number
   bucketMs: number
   nowEpoch: number
   supply: (HistoryBucket | null)[]
   exhaust: (HistoryBucket | null)[]
+  humiditySlots?: number
+  humidityBucketMs?: number
+  indoorHumidity?: (HistoryBucket | null)[]
+  outdoorHumidity?: (HistoryBucket | null)[]
   events: HeatEvent[]
 }
 

@@ -1,6 +1,6 @@
 //! Shared application state accessible from HTTP handlers and main loop.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::config::AppConfig;
@@ -13,12 +13,62 @@ use crate::scheduler::{ScheduleEntry, BypassSchedule};
 /// changes level on every dwell boundary; oldest dropped when full.
 pub const EH_EVENT_CAPACITY: usize = 64;
 
-/// A ventilation level change made by extreme-heat mode, kept so the web UI
-/// can draw a marker at the time it happened.
+/// Why the ventilation mode settled on its current level — surfaced in the UI so
+/// the (multi-factor) decision is legible, and attached to each change event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Reason {
+    #[default]
+    TempDelta,        // supply-vs-exhaust temperature bands (fallback)
+    CoolingAssist,    // outdoor air is lower-energy (enthalpy) → ventilate to cool
+    Dehumidify,       // moisture protection: indoor too humid, outdoor drier
+    MuggySuppression, // outdoor air is higher-energy (humid) → hold ventilation down
+    Manual,           // user set the level (web / encoder / MQTT)
+    Schedule,         // a ventilation schedule changed the level
+    Reboot,           // device (re)started — a marker only, not a level decision
+}
+
+impl Reason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Reason::TempDelta => "temp",
+            Reason::CoolingAssist => "cooling",
+            Reason::Dehumidify => "dehumidify",
+            Reason::MuggySuppression => "muggy",
+            Reason::Manual => "manual",
+            Reason::Schedule => "schedule",
+            Reason::Reboot => "reboot",
+        }
+    }
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "cooling" => Reason::CoolingAssist,
+            "dehumidify" => Reason::Dehumidify,
+            "muggy" => Reason::MuggySuppression,
+            "manual" => Reason::Manual,
+            "schedule" => Reason::Schedule,
+            "reboot" => Reason::Reboot,
+            _ => Reason::TempDelta,
+        }
+    }
+}
+
+/// A ventilation level change made by the mode, kept so the web UI can draw a
+/// reason-annotated marker at the time it happened.
 #[derive(Debug, Clone, Copy)]
 pub struct EhEvent {
     pub epoch: i64,
     pub level: u8,
+    pub reason: Reason,
+}
+
+/// Latest reading from one MQTT humidity sensor. `temperature`/`pressure` may be
+/// absent depending on the sensor; `humidity` is always present.
+#[derive(Debug, Clone, Copy)]
+pub struct HumiditySample {
+    pub humidity: f32,
+    pub temperature: Option<f32>,
+    pub pressure: Option<f32>,
+    pub updated_ms: u32,
 }
 
 /// Mutable application state shared between main loop and HTTP handlers.
@@ -59,6 +109,16 @@ pub struct AppStateInner {
     pub eh_current_level: u8,
     pub eh_last_change_epoch: i64,
     pub eh_events: VecDeque<EhEvent>,
+    pub eh_current_reason: Reason,
+
+    // Humidity-aware ventilation runtime state. Sensor readings come from MQTT
+    // (keyed by topic for indoor; one slot for outdoor). `ambient_pressure_kpa`
+    // is updated from any sensor reporting pressure. `protection_active` tracks
+    // the standalone moisture-protection override (with hysteresis).
+    pub humidity_inside: HashMap<String, HumiditySample>,
+    pub humidity_outside: Option<HumiditySample>,
+    pub ambient_pressure_kpa: f32,
+    pub protection_active: bool,
 
     // MQTT-backed RAM-only persistence (no flash). The MQTT receive callback
     // drops raw retained snapshots here for the main loop to parse & apply
@@ -112,6 +172,11 @@ impl AppStateInner {
             eh_current_level: requested_vent_level,
             eh_last_change_epoch: 0,
             eh_events: VecDeque::with_capacity(EH_EVENT_CAPACITY),
+            eh_current_reason: Reason::TempDelta,
+            humidity_inside: HashMap::new(),
+            humidity_outside: None,
+            ambient_pressure_kpa: crate::psychro::STANDARD_PRESSURE_KPA,
+            protection_active: false,
             pending_history_json: None,
             pending_extreme_heat_json: None,
             mqtt_publish_history: false,
@@ -134,6 +199,35 @@ impl AppStateInner {
             persist_schedules: false,
             config,
         }
+    }
+
+    /// Record a history marker (a level change or a reboot) for the web chart,
+    /// capped at [`EH_EVENT_CAPACITY`] (oldest dropped), and flag the retained
+    /// snapshot for republish so markers survive a reboot. De-duplicates an
+    /// identical (level, reason) at the same second so repeated calls from
+    /// different code paths don't stack markers.
+    pub fn push_history_marker(&mut self, epoch: i64, level: u8, reason: Reason) {
+        if let Some(last) = self.eh_events.back() {
+            if last.epoch == epoch && last.level == level && last.reason == reason {
+                return;
+            }
+        }
+        if self.eh_events.len() >= EH_EVENT_CAPACITY {
+            self.eh_events.pop_front();
+        }
+        self.eh_events.push_back(EhEvent { epoch, level, reason });
+        self.mqtt_publish_extreme_heat = true;
+    }
+
+    /// Like [`push_history_marker`] but stamps the current wall-clock time.
+    /// No-op until the clock is NTP-synced (a marker needs a real timestamp to
+    /// place it on the chart).
+    pub fn push_history_marker_now(&mut self, level: u8, reason: Reason) {
+        let epoch = unsafe { esp_idf_svc::sys::time(core::ptr::null_mut()) } as i64;
+        if epoch < 1_700_000_000 {
+            return;
+        }
+        self.push_history_marker(epoch, level, reason);
     }
 }
 

@@ -477,6 +477,7 @@ impl Display {
                 st.config.ventilation_level = self.edit_vent_level;
                 st.schedule_override = true;
                 st.initial_level_known = true;
+                st.push_history_marker_now(self.edit_vent_level, crate::app_state::Reason::Manual);
             }
         } else if apply && self.current_page == Page::Bypass {
             let open = self.edit_vent_level != 0;
@@ -763,7 +764,8 @@ fn draw_temp_chart(
     }
 
     for col in 0..128usize {
-        if let Some(b) = channel.slot_at_column(col) {
+        // The history is finer than 128 px now; aggregate each column's span.
+        if let Some(b) = channel.aggregated_column(col, 128) {
             let y_top = scale(b.max);
             let y_bottom = scale(b.min);
             let x = col as i32;

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'preact/hooks'
-import { resumeSchedule, saveConfig } from './api'
+import { resumeSchedule } from './api'
 import type { Status } from './api'
 import { ExtremeHeatChart } from './ExtremeHeatChart'
 import { t, type Lang } from './translations'
@@ -12,7 +12,6 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
   onConfirmed?: () => void
 }) {
   const [localPending, setLocalPending] = useState<number | null>(null)
-  const [ehEnabled, setEhEnabled] = useState(false)
 
   // Clear pending when CWL confirms the new level
   useEffect(() => {
@@ -21,16 +20,6 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
       onConfirmed?.()
     }
   }, [status?.ventilation.level, localPending])
-
-  // Reflect the persisted extreme-heat state as it arrives via polling.
-  useEffect(() => {
-    if (status?.extremeHeat) setEhEnabled(status.extremeHeat.enabled)
-  }, [status?.extremeHeat?.enabled])
-
-  const toggleExtremeHeat = async (v: boolean) => {
-    setEhEnabled(v) // optimistic; next poll confirms
-    await saveConfig({ extremeHeat: { enabled: v } })
-  }
 
   const handleLevelChange = (level: number) => {
     setLocalPending(level)
@@ -49,6 +38,14 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
   // Otherwise show the confirmed level
   const displayLevel = localPending ?? status.ventilation.level
 
+  const eh = status.extremeHeat
+  const hum = status.humidity
+  const showDecision = eh.enabled || eh.protectionEnabled
+  const tr = t(lang)
+  const reasonLabels = tr.reasonLabels as Record<string, string>
+  const reasonText = tr.reasonText as Record<string, string>
+  const n1 = (v: number | null, suffix = '') => (v == null ? '–' : `${v.toFixed(1)}${suffix}`)
+
   return (
     <>
       {status.timedOff?.active && (
@@ -59,6 +56,18 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
       )}
       <div class="card">
         <h3>{t(lang).ventilation}</h3>
+        {status.extremeHeat.enabled && (() => {
+          const lvl = status.extremeHeat.currentLevel
+          const d = status.temperature.supplyInlet - status.temperature.exhaustInlet
+          const dStr = `${d >= 0 ? '+' : ''}${d.toFixed(1)}`
+          return (
+            <div class="msg warning">
+              <strong>{t(lang).extremeHeatActive}</strong><br />
+              {t(lang).extremeHeatForcedTo}: <strong>{t(lang).levels[lvl]}</strong><br />
+              {t(lang).extremeHeatMatchedRule}: {reasonLabels[eh.reason] ?? eh.reason} (Δ {dStr} °C)
+            </div>
+          )
+        })()}
         <div class="level-buttons">
           {t(lang).levels.map((name, i) => {
             const isSelected = displayLevel === i
@@ -79,18 +88,41 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
         <div class="stat"><span class="label">{t(lang).supplyInlet}</span><span class="value">{status.temperature.supplyInlet.toFixed(1)} °C</span></div>
         <div class="stat"><span class="label">{t(lang).exhaustInlet}</span><span class="value">{status.temperature.exhaustInlet.toFixed(1)} °C</span></div>
       </div>
-      <div class="card">
-        <h3>{t(lang).extremeHeatMode}</h3>
-        <div class="toggle">
-          <label class="toggle-switch">
-            <input type="checkbox" checked={ehEnabled} onChange={(e) => toggleExtremeHeat((e.target as HTMLInputElement).checked)} />
-            <span class="toggle-slider" />
-          </label>
-          <span>{ehEnabled ? 'On' : 'Off'}</span>
-        </div>
-        <p style="font-size:0.8em;color:var(--text-muted);margin-top:8px">{t(lang).extremeHeatHint}</p>
-      </div>
       <ExtremeHeatChart lang={lang} />
+
+      {showDecision && (
+        <div class="card">
+          <h3>{tr.climateDecision}</h3>
+          <div class="stat"><span class="label">{tr.activeRule}</span><span class="value">{reasonLabels[eh.reason] ?? eh.reason}</span></div>
+          <div class="stat"><span class="label">{tr.level}</span><span class="value">{tr.levels[eh.currentLevel] ?? eh.currentLevel}</span></div>
+          <p style="font-size:0.85em;color:var(--text-muted);margin:6px 0">{reasonText[eh.reason] ?? ''}</p>
+          {hum.active ? (
+            <>
+              <div class="stat"><span class="label">{tr.indoorAir}</span><span class="value">{n1(hum.indoorRh, '%')} · {n1(hum.indoorAh, ' g/m³')} · {n1(hum.indoorEnthalpy, ' kJ/kg')}</span></div>
+              <div class="stat"><span class="label">{tr.outdoorAir}</span><span class="value">{n1(hum.outdoorRh, '%')} · {n1(hum.outdoorAh, ' g/m³')} · {n1(hum.outdoorEnthalpy, ' kJ/kg')}</span></div>
+              <div class="stat"><span class="label">{tr.ambientPressure}</span><span class="value">{(hum.ambientPressureKpa * 10).toFixed(0)} hPa</span></div>
+              {eh.protectionActive && <div class="msg warning" style="margin-top:8px">{tr.protectionActiveMsg}</div>}
+            </>
+          ) : (
+            <div class="msg" style="font-size:0.85em">{tr.tempOnlyFallback}</div>
+          )}
+        </div>
+      )}
+
+      {hum.sensors.length > 0 && (
+        <div class="card">
+          <h3>{tr.humiditySensors}</h3>
+          {hum.sensors.map((sn) => (
+            <div class="stat">
+              <span class="label">{sn.role === 'outdoor' ? '🌤' : '🏠'} {sn.topic}</span>
+              <span class={`value ${sn.fresh ? '' : 'fault'}`}>
+                {sn.humidity.toFixed(0)}%{sn.temperature != null ? ` · ${sn.temperature.toFixed(1)}°` : ''}{sn.pressure != null ? ` · ${sn.pressure.toFixed(0)} hPa` : ''}{sn.fresh ? '' : ' · stale'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div class="card">
         <h3>Status</h3>
         <div class="stat"><span class="label">Connected</span><span class={`value ${status.status.connected ? 'ok' : 'fault'}`}>{status.status.connected ? 'Yes' : 'No'}</span></div>

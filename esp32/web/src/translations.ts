@@ -1,7 +1,7 @@
 export type Lang = 'en' | 'de'
 
 export interface Translations {
-  status: string; schedules: string; settings: string; system: string
+  status: string; schedules: string; settings: string; system: string; debug: string
   levels: readonly string[]; days: readonly string[]
   login: string; username: string; password: string; invalidCredentials: string
   ventilationSchedules: string; weeklyOverview: string; weeklyOverviewHint: string
@@ -19,8 +19,20 @@ export interface Translations {
   current: string; temperatures: string
   supplyInlet: string; exhaustInlet: string; supplyOutlet: string; exhaustOutlet: string
   summer: string; winter: string; bypassMode: string
-  extremeHeatMode: string; extremeHeatHint: string
+  extremeHeatMode: string; extremeHeatHint: string; extremeHeatOverridesSchedules: string
+  extremeHeatActive: string; extremeHeatForcedTo: string; extremeHeatMatchedRule: string
+  ehRules: readonly string[]
   tempHistory: string; levelChanges: string; noHistoryYet: string
+  legendMeasurements: string; legendReason: string
+  // Humidity-aware ventilation
+  climateDecision: string; activeRule: string
+  humiditySensors: string; humiditySensorsHint: string
+  moistureProtection: string; outdoorSensorTopic: string; indoorSensorTopics: string; addIndoorSensor: string
+  indoorRh: string; outdoorRh: string; ambientPressure: string
+  indoorAir: string; outdoorAir: string
+  protectionActiveMsg: string; tempOnlyFallback: string
+  reasonLabels: { temp: string; cooling: string; dehumidify: string; muggy: string; manual: string; schedule: string; reboot: string }
+  reasonText: { temp: string; cooling: string; dehumidify: string; muggy: string; manual: string }
 }
 
 const en: Translations = {
@@ -29,6 +41,7 @@ const en: Translations = {
   schedules: 'Schedules',
   settings: 'Settings',
   system: 'System',
+  debug: 'Debug',
 
   // Levels
   levels: ['Off', 'Reduced', 'Normal', 'Party'] as readonly string[],
@@ -112,9 +125,44 @@ const en: Translations = {
   bypassMode: 'Bypass',
   extremeHeatMode: 'Extreme Heat Mode',
   extremeHeatHint: 'Automatically lowers ventilation when incoming air is hotter than indoor air, and boosts it when incoming air is cooler. Decisions hold for 15 min.',
+  extremeHeatOverridesSchedules: 'Extreme heat mode is active and controls the ventilation level automatically. The schedules below are overridden and have no effect until it is turned off.',
+  extremeHeatActive: 'Extreme heat mode active',
+  extremeHeatForcedTo: 'Ventilation forced to',
+  extremeHeatMatchedRule: 'Matched rule',
+  ehRules: [
+    'Incoming air much warmer than indoor (Δ > +0.5 °C)',
+    'Incoming air slightly warmer than indoor (0 to +0.5 °C)',
+    'Incoming air cooler than indoor (−1.0 to 0 °C)',
+    'Incoming air much cooler than indoor (Δ < −1.0 °C)',
+  ],
   tempHistory: 'Temperature History (24h)',
   levelChanges: 'Level changes',
   noHistoryYet: 'Collecting data…',
+  legendMeasurements: 'Measurements',
+  legendReason: 'Change reason',
+  climateDecision: 'Climate Decision',
+  activeRule: 'Active rule',
+  humiditySensors: 'Humidity Sensors',
+  humiditySensorsHint: 'MQTT topics publishing JSON with humidity / temperature / pressure. Used by extreme-heat mode (energy-based cooling) and moisture protection.',
+  moistureProtection: 'Moisture protection (year-round)',
+  outdoorSensorTopic: 'Outdoor sensor topic',
+  indoorSensorTopics: 'Indoor sensor topics',
+  addIndoorSensor: '+ Add indoor sensor',
+  indoorRh: 'Indoor RH',
+  outdoorRh: 'Outdoor RH',
+  ambientPressure: 'Ambient pressure',
+  indoorAir: 'Indoor (RH / AH / h)',
+  outdoorAir: 'Outdoor (RH / AH / h)',
+  protectionActiveMsg: 'Moisture protection is actively ventilating.',
+  tempOnlyFallback: 'Using temperature only — humidity data is missing or stale.',
+  reasonLabels: { temp: 'Temperature', cooling: 'Cooling assist', dehumidify: 'Moisture protection', muggy: 'Muggy suppression', manual: 'Manual', schedule: 'Schedule', reboot: 'Reboot' },
+  reasonText: {
+    temp: 'Deciding on the supply vs exhaust temperature difference.',
+    cooling: 'Outdoor air carries less energy — ventilating to cool.',
+    dehumidify: 'Indoor air is too humid and outside air is drier — ventilating to dehumidify.',
+    muggy: 'Outdoor air is warmer or more humid (higher energy) — holding ventilation down.',
+    manual: 'Ventilation level was set manually.',
+  },
 }
 
 const de: Translations = {
@@ -122,6 +170,7 @@ const de: Translations = {
   schedules: 'Zeitpläne',
   settings: 'Einstellungen',
   system: 'System',
+  debug: 'Debug',
 
   levels: ['Aus', 'Reduziert', 'Normal', 'Party'],
   days: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
@@ -197,9 +246,44 @@ const de: Translations = {
   bypassMode: 'Bypass',
   extremeHeatMode: 'Extremhitze-Modus',
   extremeHeatHint: 'Senkt die Lüftung automatisch, wenn die Zuluft wärmer als die Raumluft ist, und erhöht sie, wenn die Zuluft kühler ist. Entscheidungen gelten 15 Min.',
+  extremeHeatOverridesSchedules: 'Der Extremhitze-Modus ist aktiv und steuert die Lüftungsstufe automatisch. Die Zeitpläne unten werden überschrieben und haben keine Wirkung, bis er ausgeschaltet wird.',
+  extremeHeatActive: 'Extremhitze-Modus aktiv',
+  extremeHeatForcedTo: 'Lüftung erzwungen auf',
+  extremeHeatMatchedRule: 'Zutreffende Regel',
+  ehRules: [
+    'Zuluft viel wärmer als innen (Δ > +0,5 °C)',
+    'Zuluft etwas wärmer als innen (0 bis +0,5 °C)',
+    'Zuluft kühler als innen (−1,0 bis 0 °C)',
+    'Zuluft viel kühler als innen (Δ < −1,0 °C)',
+  ],
   tempHistory: 'Temperaturverlauf (24h)',
   levelChanges: 'Stufenwechsel',
   noHistoryYet: 'Sammle Daten…',
+  legendMeasurements: 'Messwerte',
+  legendReason: 'Auslöser',
+  climateDecision: 'Klima-Entscheidung',
+  activeRule: 'Aktive Regel',
+  humiditySensors: 'Feuchtesensoren',
+  humiditySensorsHint: 'MQTT-Topics mit JSON-Feldern humidity / temperature / pressure. Genutzt von Extremhitze-Modus (energiebasierte Kühlung) und Feuchteschutz.',
+  moistureProtection: 'Feuchteschutz (ganzjährig)',
+  outdoorSensorTopic: 'Außensensor-Topic',
+  indoorSensorTopics: 'Innensensor-Topics',
+  addIndoorSensor: '+ Innensensor hinzufügen',
+  indoorRh: 'Innen rel. F.',
+  outdoorRh: 'Außen rel. F.',
+  ambientPressure: 'Luftdruck',
+  indoorAir: 'Innen (rF / AF / h)',
+  outdoorAir: 'Außen (rF / AF / h)',
+  protectionActiveMsg: 'Feuchteschutz lüftet aktiv.',
+  tempOnlyFallback: 'Nur Temperatur — Feuchtedaten fehlen oder sind veraltet.',
+  reasonLabels: { temp: 'Temperatur', cooling: 'Kühlung', dehumidify: 'Feuchteschutz', muggy: 'Schwül-Stopp', manual: 'Manuell', schedule: 'Zeitplan', reboot: 'Neustart' },
+  reasonText: {
+    temp: 'Entscheidung nach der Temperaturdifferenz Zuluft/Abluft.',
+    cooling: 'Außenluft hat weniger Energie — Lüften zum Kühlen.',
+    dehumidify: 'Innenluft ist zu feucht und Außenluft ist trockener — Lüften zum Entfeuchten.',
+    muggy: 'Außenluft ist wärmer oder feuchter (mehr Energie) — Lüftung wird gedrosselt.',
+    manual: 'Lüftungsstufe wurde manuell gesetzt.',
+  },
 }
 
 const translations: Record<Lang, Translations> = { en, de }

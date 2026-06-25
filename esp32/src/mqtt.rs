@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use esp_idf_svc::mqtt::client::{EspMqttClient, EspMqttEvent, EventPayload, MqttClientConfiguration, QoS};
 use log::{info, warn};
 
-use crate::app_state::AppStateInner;
+use crate::app_state::{AppStateInner, HumiditySample};
 use crate::cwl_data::ventilation_level_name;
 
 type AppState = Arc<Mutex<AppStateInner>>;
@@ -20,6 +20,21 @@ pub struct MqttManager {
     last_publish_ms: u32,
     last_health_ms: u32,
     connected: bool,
+    /// Tracks the broker connection's rising edge so we can (re)subscribe every
+    /// time it comes up. The initial `setup_subscriptions()` runs before the
+    /// first connect and the client does not auto-resubscribe, so without this
+    /// the device intermittently misses the retained `persist/*` snapshots —
+    /// which is how restored history was lost after a flash.
+    last_connected: bool,
+    /// Humidity-sensor topics we've already subscribed to (so config edits add
+    /// new subscriptions on the next tick without a reboot).
+    subscribed_sensors: Vec<String>,
+}
+
+/// Sensor barometers report hPa (e.g. 960.9); enthalpy wants kPa. Values that
+/// already look like kPa (< 200) are passed through.
+fn pressure_to_kpa(p: f32) -> f32 {
+    if p > 200.0 { p / 10.0 } else { p }
 }
 
 impl MqttManager {
@@ -45,7 +60,12 @@ impl MqttManager {
         let url = format!("mqtt://{}:{}", mqtt_server, mqtt_port);
         let base_topic = mqtt_topic;
 
+        // Buffers sized to hold the retained history snapshot (~12 KB of
+        // downsampled timestamped points) in a single frame, so neither the
+        // publish nor the recovery read fragments.
         let conf = MqttClientConfiguration {
+            buffer_size: 16384,
+            out_buffer_size: 16384,
             ..Default::default()
         };
 
@@ -76,7 +96,34 @@ impl MqttManager {
             last_publish_ms: 0,
             last_health_ms: 0,
             connected: true,
+            last_connected: false,
+            subscribed_sensors: Vec::new(),
         })
+    }
+
+    /// Subscribe to any configured humidity-sensor topics not yet subscribed.
+    /// Idempotent: called at setup and each tick so config edits apply without
+    /// a reboot.
+    fn sync_sensor_subscriptions(&mut self) {
+        let topics: Vec<String> = {
+            let st = self.state.lock().unwrap();
+            let mut v = st.config.humidity_inside_topics.clone();
+            if !st.config.humidity_outside_topic.is_empty() {
+                v.push(st.config.humidity_outside_topic.clone());
+            }
+            v
+        };
+        for t in topics {
+            if t.is_empty() || self.subscribed_sensors.contains(&t) {
+                continue;
+            }
+            if let Err(e) = self.client.subscribe(&t, QoS::AtMostOnce) {
+                warn!("MQTT: Subscribe to sensor {} failed: {:?}", t, e);
+            } else {
+                info!("MQTT: Subscribed to humidity sensor {}", t);
+                self.subscribed_sensors.push(t);
+            }
+        }
     }
 
     pub fn setup_subscriptions(&mut self) {
@@ -96,6 +143,7 @@ impl MqttManager {
             }
         }
         info!("MQTT: Subscribed to command topics");
+        self.sync_sensor_subscriptions();
 
         // Publish bridge info
         self.pub_retained("bridge/state", "online");
@@ -114,6 +162,20 @@ impl MqttManager {
         if !self.connected {
             return;
         }
+
+        // (Re)subscribe on every broker connection rising edge. The client does
+        // not auto-resubscribe after a reconnect, and the boot-time subscribe can
+        // run before the link is up, so re-establishing here is what makes the
+        // retained persist/* snapshots (history + extreme-heat) reliably arrive.
+        let now_connected = self.state.lock().unwrap().mqtt_connected;
+        if now_connected && !self.last_connected {
+            self.setup_subscriptions();
+            self.subscribed_sensors.clear();
+        }
+        self.last_connected = now_connected;
+
+        // Pick up newly-configured sensor topics (cheap; no-op when unchanged).
+        self.sync_sensor_subscriptions();
 
         if now_ms.wrapping_sub(self.last_publish_ms) >= SENSOR_INTERVAL_MS {
             self.last_publish_ms = now_ms;
@@ -139,11 +201,28 @@ impl MqttManager {
     }
 
     fn publish_history_snapshot(&mut self) {
+        let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
+        // Never overwrite the broker's good retained copy with an empty/unrecovered
+        // snapshot. Two ways that can happen right after boot:
+        //  * clock not yet NTP-synced — recovery is still pending (it waits for a
+        //    valid clock), so RAM history hasn't been restored yet;
+        //  * a retained snapshot existed but recovery hasn't applied it.
+        // In both cases publishing now would wipe the persisted history. Hold off
+        // until the clock is valid and either recovery has run or there was nothing
+        // to recover.
+        {
+            let st = self.state.lock().unwrap();
+            if now_epoch < 1_700_000_000 || st.pending_history_json.is_some() {
+                return;
+            }
+        }
         let json = {
             let st = self.state.lock().unwrap();
-            let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
             st.temp_history.snapshot_json(now_epoch)
         };
+        if json.contains("\"points\":[]") {
+            return;
+        }
         self.pub_retained("persist/temp_history", &json);
     }
 
@@ -153,12 +232,16 @@ impl MqttManager {
             let mut events = String::from("[");
             for (i, e) in st.eh_events.iter().enumerate() {
                 if i > 0 { events.push(','); }
-                events.push_str(&format!("{{\"epoch\":{},\"level\":{}}}", e.epoch, e.level));
+                events.push_str(&format!(
+                    "{{\"epoch\":{},\"level\":{},\"reason\":\"{}\"}}",
+                    e.epoch, e.level, e.reason.as_str()
+                ));
             }
             events.push(']');
             format!(
-                "{{\"enabled\":{},\"currentLevel\":{},\"lastChangeEpoch\":{},\"events\":{}}}",
-                st.config.extreme_heat_enabled, st.eh_current_level, st.eh_last_change_epoch, events
+                "{{\"enabled\":{},\"currentLevel\":{},\"lastChangeEpoch\":{},\"reason\":\"{}\",\"events\":{}}}",
+                st.config.extreme_heat_enabled, st.eh_current_level, st.eh_last_change_epoch,
+                st.eh_current_reason.as_str(), events
             )
         };
         self.pub_retained("persist/extreme_heat", &json);
@@ -220,6 +303,7 @@ impl MqttManager {
         self.pub_retained("health/free_heap", &free_heap.to_string());
         self.pub_retained("health/reboot_reason", crate::watchdog::reboot_reason());
         self.pub_retained("health/crash_count", "0");
+        self.pub_retained("health/last_panic", &crate::panic_capture::last_panic().unwrap_or_default());
 
         let ot_age = {
             let st = self.state.lock().unwrap();
@@ -251,6 +335,10 @@ fn handle_event(event: EspMqttEvent<'_>, state: &AppState, base_topic: &str) {
         }
         EventPayload::Received { topic, data, .. } => {
             if let Some(topic) = topic {
+                // Humidity sensor topics are user-configured (not base-prefixed).
+                if try_ingest_sensor(topic, data, state) {
+                    return;
+                }
                 // Retained persistence snapshots: stash the raw bytes for the
                 // main loop to parse (no heavy JSON work on this callback thread)
                 // and apply only the FIRST one per topic after boot.
@@ -276,6 +364,41 @@ fn handle_event(event: EspMqttEvent<'_>, state: &AppState, base_topic: &str) {
     }
 }
 
+/// If `topic` is a configured humidity sensor, parse humidity/temperature/
+/// pressure and store the latest reading. Returns true if it matched a sensor.
+fn try_ingest_sensor(topic: &str, data: &[u8], state: &AppState) -> bool {
+    let mut st = state.lock().unwrap();
+    let is_inside = st.config.humidity_inside_topics.iter().any(|t| t == topic);
+    let is_outside = !st.config.humidity_outside_topic.is_empty()
+        && st.config.humidity_outside_topic == topic;
+    if !is_inside && !is_outside {
+        return false;
+    }
+    // Sensor payloads are small — parsing on the callback thread is fine.
+    let val: serde_json::Value = match serde_json::from_slice(data) {
+        Ok(v) => v,
+        Err(_) => return true, // matched a sensor topic; ignore malformed payload
+    };
+    let humidity = match val["humidity"].as_f64() {
+        Some(h) => h as f32,
+        None => return true, // humidity is required
+    };
+    let temperature = val["temperature"].as_f64().map(|v| v as f32);
+    let pressure = val["pressure"].as_f64().map(|v| v as f32);
+    let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
+    let sample = HumiditySample { humidity, temperature, pressure, updated_ms: now_ms };
+    if let Some(p) = pressure {
+        st.ambient_pressure_kpa = pressure_to_kpa(p);
+    }
+    if is_inside {
+        st.humidity_inside.insert(topic.to_string(), sample);
+    }
+    if is_outside {
+        st.humidity_outside = Some(sample);
+    }
+    true
+}
+
 fn handle_command(topic: &str, message: &str, state: &AppState, _base_topic: &str) {
     let mut st = state.lock().unwrap();
 
@@ -286,6 +409,7 @@ fn handle_command(topic: &str, message: &str, state: &AppState, _base_topic: &st
                 st.config.ventilation_level = level;
                 st.initial_level_known = true;
                 st.display_wake_requested = true;
+                st.push_history_marker_now(level, crate::app_state::Reason::Manual);
                 info!("MQTT: Level set to {} ({})", level, ventilation_level_name(level));
             }
         }
