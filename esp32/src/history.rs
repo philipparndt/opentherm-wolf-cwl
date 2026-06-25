@@ -164,9 +164,6 @@ impl Channel {
 pub struct SimDayCycle {
     pub outdoor: f32,
     pub indoor: f32,
-    pub supply_outlet: f32,
-    pub exhaust_outlet: f32,
-    pub delta: f32,
 }
 
 #[cfg(feature = "simulate-ot")]
@@ -182,23 +179,18 @@ pub fn simulated_day_cycle(hours_offset: f32) -> SimDayCycle {
     let outdoor_amp = 8.0_f32;
     let indoor_base = 22.0_f32;
     let indoor_amp = 0.5_f32;
-    let efficiency = 0.85_f32;
 
     let hour_of_day = (SIM_PEAK_HOUR + hours_offset).rem_euclid(24.0);
     let phase = (hour_of_day - SIM_PEAK_HOUR) * (2.0 * PI / 24.0);
     let outdoor = outdoor_base + outdoor_amp * phase.cos();
     let indoor = indoor_base + indoor_amp * (phase + PI / 4.0).sin();
-    let supply_outlet = outdoor + (indoor - outdoor) * efficiency;
-    let exhaust_outlet = indoor - (indoor - outdoor) * efficiency;
-    let delta = supply_outlet - outdoor;
-    SimDayCycle { outdoor, indoor, supply_outlet, exhaust_outlet, delta }
+    SimDayCycle { outdoor, indoor }
 }
 
 #[derive(Debug)]
 pub struct TempHistory {
     pub outdoor: Channel,
     pub indoor: Channel,
-    pub delta: Channel,
     // Coarse humidity history (RH %), independent 5-min buckets.
     pub indoor_humidity: Channel,
     pub outdoor_humidity: Channel,
@@ -212,7 +204,6 @@ impl TempHistory {
         let h = Self {
             outdoor: Channel::new(),
             indoor: Channel::new(),
-            delta: Channel::new(),
             indoor_humidity: Channel::with_len(HUMIDITY_SLOTS),
             outdoor_humidity: Channel::with_len(HUMIDITY_SLOTS),
             bucket_start_ms: 0,
@@ -240,7 +231,6 @@ impl TempHistory {
             let idx = (HISTORY_SLOTS + col + 1) % HISTORY_SLOTS;
             h.outdoor.slots[idx] = Some(Bucket { min: cycle.outdoor, max: cycle.outdoor });
             h.indoor.slots[idx] = Some(Bucket { min: cycle.indoor, max: cycle.indoor });
-            h.delta.slots[idx] = Some(Bucket { min: cycle.delta, max: cycle.delta });
         }
         h
     }
@@ -262,7 +252,6 @@ impl TempHistory {
         } else if now_ms.wrapping_sub(self.bucket_start_ms) >= BUCKET_MS {
             self.outdoor.advance();
             self.indoor.advance();
-            self.delta.advance();
             self.bucket_start_ms = now_ms;
             rolled = true;
         }
@@ -274,14 +263,10 @@ impl TempHistory {
         // we reject the 0.0 sentinel (and implausible values). The bucket still
         // advances on schedule above; it just stays empty until valid data.
         if data.connected {
-            let s = data.supply_inlet_temp;
-            let e = data.exhaust_inlet_temp;
+            let s = data.supply_temp;
+            let e = data.exhaust_temp;
             if is_real_temp(s) { self.outdoor.fold(s); }
             if is_real_temp(e) { self.indoor.fold(e); }
-            if data.supports_id81 && is_real_temp(s) {
-                let so = data.supply_outlet_temp;
-                if is_real_temp(so) { self.delta.fold(so - s); }
-            }
         }
 
         rolled
@@ -337,9 +322,9 @@ impl TempHistory {
     }
 
     /// Build the retained MQTT snapshot: a time-downsampled list of timestamped
-    /// points `[epoch, sMin,sMax, eMin,eMax, dMin,dMax]` (null where a channel is
-    /// missing). Because each point carries its own epoch, recovery re-bins by
-    /// time and is independent of the live resolution.
+    /// points `[epoch, sMin,sMax, eMin,eMax]` (null where a channel is missing).
+    /// Because each point carries its own epoch, recovery re-bins by time and is
+    /// independent of the live resolution.
     pub fn snapshot_json(&self, now_epoch: i64) -> String {
         let bsec = (BUCKET_MS / 1000) as i64;
         let newest = HISTORY_SLOTS - 1;
@@ -353,7 +338,6 @@ impl TempHistory {
             let hi = ((j + 1) * HISTORY_SLOTS / MQTT_SNAPSHOT_POINTS).max(lo + 1);
             let sup = match self.outdoor.range_minmax(lo, hi) { Some(b) => b, None => continue };
             let exh = self.indoor.range_minmax(lo, hi);
-            let del = self.delta.range_minmax(lo, hi);
             // Representative time = newest column in the group.
             let rep_col = hi.min(HISTORY_SLOTS) - 1;
             let t = now_epoch - ((newest - rep_col) as i64) * bsec;
@@ -363,7 +347,6 @@ impl TempHistory {
             s.push_str(&t.to_string());
             push_pair(&mut s, Some(sup));
             push_pair(&mut s, exh);
-            push_pair(&mut s, del);
             s.push(']');
         }
         s.push(']');
@@ -413,8 +396,8 @@ impl TempHistory {
         let bsec = (BUCKET_MS / 1000) as i64;
         let newest = (HISTORY_SLOTS - 1) as i64;
 
-        // Reset all three channels with head at the newest slot (slot idx == col).
-        for ch in [&mut self.outdoor, &mut self.indoor, &mut self.delta] {
+        // Reset both channels with head at the newest slot (slot idx == col).
+        for ch in [&mut self.outdoor, &mut self.indoor] {
             ch.head = HISTORY_SLOTS - 1;
             for slot in ch.slots.iter_mut() { *slot = None; }
         }
@@ -432,8 +415,6 @@ impl TempHistory {
             let s_max = parse_opt(it.next());
             let e_min = parse_opt(it.next());
             let e_max = parse_opt(it.next());
-            let d_min = parse_opt(it.next());
-            let d_max = parse_opt(it.next());
             if let Some(t) = t {
                 // Bucket index back from "now", rounded.
                 let back = (now_epoch - t + bsec / 2) / bsec;
@@ -446,9 +427,6 @@ impl TempHistory {
                     if let (Some(a), Some(b)) = (e_min, e_max) {
                         self.indoor.slots[col] = Some(Bucket { min: a, max: b });
                     }
-                    if let (Some(a), Some(b)) = (d_min, d_max) {
-                        self.delta.slots[col] = Some(Bucket { min: a, max: b });
-                    }
                 }
             }
             i = close + 1;
@@ -457,7 +435,6 @@ impl TempHistory {
         if any {
             self.outdoor.fill_gaps_forward();
             self.indoor.fill_gaps_forward();
-            self.delta.fill_gaps_forward();
             // Continue sampling into the restored newest bucket.
             self.bucket_start_ms = 0;
             self.last_sample_ms = 0;

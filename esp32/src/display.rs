@@ -52,7 +52,7 @@ fn clear_disp(d: &mut Disp) {
     { d.clear(); }
 }
 
-pub const PAGE_COUNT: usize = 9;
+pub const PAGE_COUNT: usize = 8;
 const STANDBY_TIMEOUT_MS: u32 = 300_000;
 const OVERLAY_TIMEOUT_MS: u32 = 10_000;
 const EDIT_TIMEOUT_MS: u32 = 10_000;
@@ -65,7 +65,7 @@ const FONT_MEDIUM: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB12_t
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Page {
     Home = 0, Bypass, TempIn,
-    OutdoorHistory, IndoorHistory, DeltaHistory,
+    OutdoorHistory, IndoorHistory,
     Status, System, Settings,
 }
 
@@ -73,8 +73,8 @@ impl Page {
     fn from_index(i: usize) -> Self {
         match i % PAGE_COUNT {
             0 => Self::Home, 1 => Self::Bypass, 2 => Self::TempIn,
-            3 => Self::OutdoorHistory, 4 => Self::IndoorHistory, 5 => Self::DeltaHistory,
-            6 => Self::Status, 7 => Self::System, 8 => Self::Settings,
+            3 => Self::OutdoorHistory, 4 => Self::IndoorHistory,
+            5 => Self::Status, 6 => Self::System, 7 => Self::Settings,
             _ => Self::Home,
         }
     }
@@ -274,7 +274,6 @@ impl Display {
                 Page::TempIn => draw_temp_in(d, st, lang),
                 Page::OutdoorHistory => draw_outdoor_history(d, st, lang),
                 Page::IndoorHistory => draw_indoor_history(d, st, lang),
-                Page::DeltaHistory => draw_delta_history(d, st, lang),
                 Page::Status => draw_status(d, st, lang),
                 Page::System => draw_system(d, st, lang),
                 Page::Settings => draw_settings(d, st, lang, edit_mode, edit_vent_level),
@@ -671,22 +670,20 @@ fn draw_temp_value(d: &mut impl DrawTarget<Color = BinaryColor>, label: &str, te
 fn draw_temp_in(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
     let s = tr(lang);
     draw_header(d, s.intake);
-    draw_temp_value(d, s.supply, st.cwl_data.supply_inlet_temp, 18);
-    draw_temp_value(d, s.exhaust, st.cwl_data.exhaust_inlet_temp, 38);
+    draw_temp_value(d, s.supply, st.cwl_data.supply_temp, 18);
+    draw_temp_value(d, s.exhaust, st.cwl_data.exhaust_temp, 38);
 }
 
 fn draw_status(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
     let s = tr(lang);
     draw_header(d, s.status);
-    let s1 = format!("{} {}", s.fault, if st.cwl_data.fault { s.yes } else { s.no });
-    draw_small(d, &s1, 0, 14);
     let s2 = format!("{} {}", s.filter, if st.cwl_data.filter_dirty { s.replace } else { s.ok });
-    draw_small(d, &s2, 0, 25);
+    draw_small(d, &s2, 0, 14);
     let s3 = format!("{} {}", s.mode, if st.requested_bypass_open { s.summer } else { s.winter });
-    draw_small(d, &s3, 0, 35);
+    draw_small(d, &s3, 0, 25);
     if st.cwl_data.tsp_valid[52] {
         let s4 = format!("{} {} m3/h", s.airflow, st.cwl_data.current_volume);
-        draw_small(d, &s4, 0, 46);
+        draw_small(d, &s4, 0, 36);
     }
 }
 
@@ -789,12 +786,6 @@ fn draw_indoor_history(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppSta
     let s = tr(lang);
     draw_header(d, s.indoor_24h);
     draw_temp_chart(d, &st.temp_history.indoor, s, false);
-}
-
-fn draw_delta_history(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
-    let s = tr(lang);
-    draw_header(d, s.delta_24h);
-    draw_temp_chart(d, &st.temp_history.delta, s, true);
 }
 
 fn draw_system(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {

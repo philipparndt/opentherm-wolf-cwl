@@ -59,12 +59,9 @@ pub struct Strings {
     pub heat_recovery_desc: &'static str,
 
     // Status labels
-    pub fault: &'static str,
     pub filter: &'static str,
     pub mode: &'static str,
     pub airflow: &'static str,
-    pub yes: &'static str,
-    pub no: &'static str,
     pub replace: &'static str,
     pub ok: &'static str,
 
@@ -105,7 +102,6 @@ pub struct Strings {
     // Temperature history pages
     pub outdoor_24h: &'static str,
     pub indoor_24h: &'static str,
-    pub delta_24h: &'static str,
     pub min_label: &'static str,
     pub max_label: &'static str,
     pub history_empty: &'static str,
@@ -138,12 +134,9 @@ pub const EN: Strings = Strings {
     bypass_open_desc: "Bypass open - free cooling",
     heat_recovery_desc: "Heat recovery active",
 
-    fault: "Fault:",
     filter: "Filter:",
     mode: "Mode:",
     airflow: "Airflow:",
-    yes: "YES",
-    no: "No",
     replace: "REPLACE",
     ok: "OK",
 
@@ -176,7 +169,6 @@ pub const EN: Strings = Strings {
 
     outdoor_24h: "Outdoor 24h",
     indoor_24h: "Indoor 24h",
-    delta_24h: "Gain 24h",
     min_label: "Min",
     max_label: "Max",
     history_empty: "Collecting...",
@@ -209,12 +201,9 @@ pub const DE: Strings = Strings {
     bypass_open_desc: "Bypass offen - K\u{fc}hlung",
     heat_recovery_desc: "W\u{e4}rmer\u{fc}ckgewinnung",
 
-    fault: "St\u{f6}rung:",
     filter: "Filter:",
     mode: "Modus:",
     airflow: "Luftstrom:",
-    yes: "JA",
-    no: "Nein",
     replace: "WECHSELN",
     ok: "OK",
 
@@ -247,7 +236,6 @@ pub const DE: Strings = Strings {
 
     outdoor_24h: "Au\u{df}en 24h",
     indoor_24h: "Innen 24h",
-    delta_24h: "Gewinn 24h",
     min_label: "Min",
     max_label: "Max",
     history_empty: "Sammle...",

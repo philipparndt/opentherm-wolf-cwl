@@ -6,8 +6,8 @@ import type { Status } from './api'
 function makeStatus(level: number, requestedLevel?: number): Status {
   return {
     ventilation: { level, levelName: ['Off', 'Reduced', 'Normal', 'Party'][level], relative: [0, 51, 67, 100][level], requestedLevel: requestedLevel ?? level, scheduleActive: true, override: false },
-    temperature: { supplyInlet: 18.5, exhaustInlet: 21.0 },
-    status: { fault: false, filter: false, bypass: false, connected: true },
+    temperature: { supply: 18.5, exhaust: 21.0 },
+    status: { filter: false, bypass: false, connected: true },
     system: { uptime: 100, freeHeap: 200000, version: 'test', mqttConnected: true, wifiRssi: -50, simulated: false },
     timedOff: { active: false, remainingMinutes: 0 },
     extremeHeat: { enabled: false, currentLevel: level, lastChangeEpoch: 0, reason: 'temp', protectionEnabled: false, protectionActive: false },

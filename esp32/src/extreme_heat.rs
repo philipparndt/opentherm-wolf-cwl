@@ -131,8 +131,8 @@ impl ExtremeHeat {
         if !st.cwl_data.connected {
             return; // need live temps (also for sensor fallbacks)
         }
-        let supply = st.cwl_data.supply_inlet_temp;
-        let exhaust = st.cwl_data.exhaust_inlet_temp;
+        let supply = st.cwl_data.supply_temp;
+        let exhaust = st.cwl_data.exhaust_temp;
 
         // Capture our baseline from the now-settled requested level (post-boot the
         // OT master has mirrored the unit's real level into it). The dwell timer
@@ -181,8 +181,8 @@ impl ExtremeHeat {
         if now_epoch < EPOCH_VALID || !st.cwl_data.connected {
             return;
         }
-        let supply = st.cwl_data.supply_inlet_temp;
-        let exhaust = st.cwl_data.exhaust_inlet_temp;
+        let supply = st.cwl_data.supply_temp;
+        let exhaust = st.cwl_data.exhaust_temp;
         let target = humidity::inputs(st, now_ms, exhaust, supply)
             .and_then(|inp| humidity::protection_level(&inp, st.protection_active));
 

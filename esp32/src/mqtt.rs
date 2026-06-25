@@ -257,13 +257,9 @@ impl MqttManager {
         msgs.push(("ventilation/level".into(), d.ventilation_level.to_string()));
         msgs.push(("ventilation/level_name".into(), ventilation_level_name(d.ventilation_level).into()));
         msgs.push(("ventilation/relative".into(), d.relative_ventilation.to_string()));
-        msgs.push(("temperature/supply_inlet".into(), format!("{:.1}", d.supply_inlet_temp)));
-        msgs.push(("temperature/exhaust_inlet".into(), format!("{:.1}", d.exhaust_inlet_temp)));
+        msgs.push(("temperature/supply".into(), format!("{:.1}", d.supply_temp)));
+        msgs.push(("temperature/exhaust".into(), format!("{:.1}", d.exhaust_temp)));
 
-        if d.supports_id81 { msgs.push(("temperature/supply_outlet".into(), format!("{:.1}", d.supply_outlet_temp))); }
-        if d.supports_id83 { msgs.push(("temperature/exhaust_outlet".into(), format!("{:.1}", d.exhaust_outlet_temp))); }
-
-        msgs.push(("status/fault".into(), if d.fault { "1" } else { "0" }.into()));
         msgs.push(("status/filter".into(), if d.filter_dirty { "1" } else { "0" }.into()));
         msgs.push(("status/bypass".into(), if d.ventilation_active { "1" } else { "0" }.into()));
 

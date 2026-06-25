@@ -179,8 +179,8 @@ export function ExtremeHeatChart({ lang }: { lang: Lang }) {
       {/* legend */}
       <div style={LEGEND_TITLE}>{tr.legendMeasurements}:</div>
       <div style="display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:0.8em;color:var(--text-muted)">
-        <span style="white-space:nowrap"><span style="display:inline-block;width:14px;height:3px;background:var(--accent-orange);vertical-align:middle;margin-right:4px" />{t(lang).supplyInlet}</span>
-        <span style="white-space:nowrap"><span style="display:inline-block;width:14px;height:3px;background:var(--accent-blue);vertical-align:middle;margin-right:4px" />{t(lang).exhaustInlet}</span>
+        <span style="white-space:nowrap"><span style="display:inline-block;width:14px;height:3px;background:var(--accent-orange);vertical-align:middle;margin-right:4px" />{t(lang).supply}</span>
+        <span style="white-space:nowrap"><span style="display:inline-block;width:14px;height:3px;background:var(--accent-blue);vertical-align:middle;margin-right:4px" />{t(lang).exhaust}</span>
         {hasHumidity && <span style="white-space:nowrap"><span style="display:inline-block;width:14px;height:0;border-top:2px dashed #22c3c3;vertical-align:middle;margin-right:4px" />{tr.indoorRh}</span>}
         {hasHumidity && <span style="white-space:nowrap"><span style="display:inline-block;width:14px;height:0;border-top:2px dashed #a78bfa;vertical-align:middle;margin-right:4px" />{tr.outdoorRh}</span>}
       </div>

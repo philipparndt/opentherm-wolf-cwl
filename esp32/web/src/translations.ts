@@ -17,7 +17,7 @@ export interface Translations {
   systemInfo: string; firmwareUpdate: string; uploadFirmware: string; uploading: string; updateSuccessful: string
   ventilation: string; override: string; timedOff: string; cancelOff: string; resumesIn: string
   current: string; temperatures: string
-  supplyInlet: string; exhaustInlet: string; supplyOutlet: string; exhaustOutlet: string
+  supply: string; exhaust: string
   summer: string; winter: string; bypassMode: string
   extremeHeatMode: string; extremeHeatHint: string; extremeHeatOverridesSchedules: string
   extremeHeatActive: string; extremeHeatForcedTo: string; extremeHeatMatchedRule: string
@@ -116,10 +116,8 @@ const en: Translations = {
   resumesIn: 'Resumes in',
   current: 'Current',
   temperatures: 'Temperatures',
-  supplyInlet: 'Supply inlet',
-  exhaustInlet: 'Exhaust inlet',
-  supplyOutlet: 'Supply outlet',
-  exhaustOutlet: 'Exhaust outlet',
+  supply: 'Supply',
+  exhaust: 'Exhaust',
   summer: 'Summer',
   winter: 'Winter',
   bypassMode: 'Bypass',
@@ -237,10 +235,8 @@ const de: Translations = {
   resumesIn: 'Weiter in',
   current: 'Aktuell',
   temperatures: 'Temperaturen',
-  supplyInlet: 'Zuluft Eingang',
-  exhaustInlet: 'Abluft Eingang',
-  supplyOutlet: 'Zuluft Ausgang',
-  exhaustOutlet: 'Abluft Ausgang',
+  supply: 'Zuluft',
+  exhaust: 'Abluft',
   summer: 'Sommer',
   winter: 'Winter',
   bypassMode: 'Bypass',

@@ -67,17 +67,14 @@ impl VentLevel {
 #[allow(dead_code)]
 pub struct CwlData {
     // Temperatures (f8.8 format, °C)
-    pub supply_inlet_temp: f32,     // ID 80
-    pub exhaust_inlet_temp: f32,    // ID 82
-    pub supply_outlet_temp: f32,    // ID 81 (if supported)
-    pub exhaust_outlet_temp: f32,   // ID 83 (if supported)
+    pub supply_temp: f32,     // ID 80
+    pub exhaust_temp: f32,    // ID 82
 
     // Ventilation
     pub ventilation_level: u8,       // ID 71: 0-3
     pub relative_ventilation: u8,    // ID 77: 0-100%
 
     // Status flags from ID 70 response
-    pub fault: bool,
     pub ventilation_active: bool,    // bypass active
     pub cooling_active: bool,
     pub dhw_active: bool,
@@ -109,8 +106,6 @@ pub struct CwlData {
     // Probed data ID support
     pub supports_id78: bool,  // Relative humidity
     pub supports_id79: bool,  // CO2 level
-    pub supports_id81: bool,  // Supply outlet temp
-    pub supports_id83: bool,  // Exhaust outlet temp
     pub supports_id84: bool,  // Exhaust fan speed
     pub supports_id85: bool,  // Supply fan speed
     pub supports_id87: bool,  // Nominal ventilation
@@ -137,13 +132,10 @@ pub struct CwlData {
 impl Default for CwlData {
     fn default() -> Self {
         Self {
-            supply_inlet_temp: 0.0,
-            exhaust_inlet_temp: 0.0,
-            supply_outlet_temp: 0.0,
-            exhaust_outlet_temp: 0.0,
+            supply_temp: 0.0,
+            exhaust_temp: 0.0,
             ventilation_level: VentLevel::Normal as u8,
             relative_ventilation: 0,
-            fault: false,
             ventilation_active: false,
             cooling_active: false,
             dhw_active: false,
@@ -163,8 +155,6 @@ impl Default for CwlData {
             slave_version: 0,
             supports_id78: false,
             supports_id79: false,
-            supports_id81: false,
-            supports_id83: false,
             supports_id84: false,
             supports_id85: false,
             supports_id87: false,

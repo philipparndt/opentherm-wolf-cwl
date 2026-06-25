@@ -148,7 +148,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         // Humidity sensors + derived psychrometrics for the decision explainer.
         let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
         let inp = crate::humidity::inputs(
-            &st, now_ms, st.cwl_data.exhaust_inlet_temp, st.cwl_data.supply_inlet_temp);
+            &st, now_ms, st.cwl_data.exhaust_temp, st.cwl_data.supply_temp);
         let mut sensors: Vec<serde_json::Value> = Vec::new();
         for (topic, sm) in st.humidity_inside.iter() {
             sensors.push(json!({
@@ -186,11 +186,10 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "override": st.schedule_override,
             },
             "temperature": {
-                "supplyInlet": d.supply_inlet_temp,
-                "exhaustInlet": d.exhaust_inlet_temp,
+                "supply": d.supply_temp,
+                "exhaust": d.exhaust_temp,
             },
             "status": {
-                "fault": d.fault,
                 "filter": d.filter_dirty,
                 "bypass": d.ventilation_active,
                 "connected": d.connected,

@@ -29,8 +29,6 @@ enum PollState {
     SlaveVersion,
     Tsp,
     Fault,
-    SupplyOutlet,
-    ExhaustOutlet,
     ExhaustFan,
     SupplyFan,
     CycleDone,
@@ -174,7 +172,6 @@ impl OtMaster {
                 (req, Box::new(|resp, st| {
                     let hi = ((resp >> 8) & 0xFF) as u8;
                     let lo = (resp & 0xFF) as u8;
-                    st.cwl_data.fault = hi & 0x01 != 0;
                     st.cwl_data.ventilation_active = (hi >> 1) & 0x01 != 0;
                     st.cwl_data.cooling_active = (hi >> 2) & 0x01 != 0;
                     st.cwl_data.dhw_active = (hi >> 3) & 0x01 != 0;
@@ -255,14 +252,14 @@ impl OtMaster {
                 let req = OpenTherm::build_request(MessageType::ReadData, 80, 0);
                 self.poll_state = PollState::ExhaustTemp;
                 (req, Box::new(|resp, st| {
-                    st.cwl_data.supply_inlet_temp = decode_f88((resp & 0xFFFF) as u16);
+                    st.cwl_data.supply_temp = decode_f88((resp & 0xFFFF) as u16);
                 }))
             }
             PollState::ExhaustTemp => {
                 let req = OpenTherm::build_request(MessageType::ReadData, 82, 0);
                 self.poll_state = PollState::MasterVersion;
                 (req, Box::new(|resp, st| {
-                    st.cwl_data.exhaust_inlet_temp = decode_f88((resp & 0xFFFF) as u16);
+                    st.cwl_data.exhaust_temp = decode_f88((resp & 0xFFFF) as u16);
                 }))
             }
             PollState::MasterVersion => {
@@ -295,9 +292,7 @@ impl OtMaster {
             PollState::Fault => {
                 let req = OpenTherm::build_request(MessageType::ReadData, 72, 0);
                 // Next state depends on supported IDs
-                self.poll_state = if st.cwl_data.supports_id81 { PollState::SupplyOutlet }
-                    else if st.cwl_data.supports_id83 { PollState::ExhaustOutlet }
-                    else if st.cwl_data.supports_id84 { PollState::ExhaustFan }
+                self.poll_state = if st.cwl_data.supports_id84 { PollState::ExhaustFan }
                     else if st.cwl_data.supports_id85 { PollState::SupplyFan }
                     else { PollState::CycleDone };
                 (req, Box::new(|resp, st| {
@@ -313,25 +308,6 @@ impl OtMaster {
                     if code != prev_code {
                         info!("OT: oem_fault_code {} -> {}", prev_code, code);
                     }
-                }))
-            }
-            PollState::SupplyOutlet => {
-                let req = OpenTherm::build_request(MessageType::ReadData, 81, 0);
-                self.poll_state = if st.cwl_data.supports_id83 { PollState::ExhaustOutlet }
-                    else if st.cwl_data.supports_id84 { PollState::ExhaustFan }
-                    else if st.cwl_data.supports_id85 { PollState::SupplyFan }
-                    else { PollState::CycleDone };
-                (req, Box::new(|resp, st| {
-                    st.cwl_data.supply_outlet_temp = decode_f88((resp & 0xFFFF) as u16);
-                }))
-            }
-            PollState::ExhaustOutlet => {
-                let req = OpenTherm::build_request(MessageType::ReadData, 83, 0);
-                self.poll_state = if st.cwl_data.supports_id84 { PollState::ExhaustFan }
-                    else if st.cwl_data.supports_id85 { PollState::SupplyFan }
-                    else { PollState::CycleDone };
-                (req, Box::new(|resp, st| {
-                    st.cwl_data.exhaust_outlet_temp = decode_f88((resp & 0xFFFF) as u16);
                 }))
             }
             PollState::ExhaustFan => {
@@ -409,9 +385,9 @@ impl OtMaster {
             let total = self.stat_success.wrapping_add(self.stat_invalid).wrapping_add(self.stat_timeout);
             let st = self.state.lock().unwrap();
             info!(
-                "OpenTherm stats: total={} success={} invalid={} timeout={} | fault={} filter_dirty={} oem_code={}",
+                "OpenTherm stats: total={} success={} invalid={} timeout={} | filter_dirty={} oem_code={}",
                 total, self.stat_success, self.stat_invalid, self.stat_timeout,
-                st.cwl_data.fault, st.cwl_data.filter_dirty, st.cwl_data.oem_fault_code
+                st.cwl_data.filter_dirty, st.cwl_data.oem_fault_code
             );
         }
     }
@@ -423,8 +399,6 @@ impl OtMaster {
         info!("OpenTherm: Probing additional data IDs...");
 
         let probes: &[(u8, &str)] = &[
-            (81, "Supply outlet temp"),
-            (83, "Exhaust outlet temp"),
             (84, "Exhaust fan speed"),
             (85, "Supply fan speed"),
             (78, "Relative humidity"),
@@ -445,8 +419,6 @@ impl OtMaster {
             match id {
                 78 => st.cwl_data.supports_id78 = supported,
                 79 => st.cwl_data.supports_id79 = supported,
-                81 => st.cwl_data.supports_id81 = supported,
-                83 => st.cwl_data.supports_id83 = supported,
                 84 => st.cwl_data.supports_id84 = supported,
                 85 => st.cwl_data.supports_id85 = supported,
                 87 => st.cwl_data.supports_id87 = supported,
@@ -475,10 +447,8 @@ impl OtMaster {
         // simulated hour-of-day by one hour.
         let hours_since_boot = now_ms as f32 / 3_600_000.0;
         let cycle = crate::history::simulated_day_cycle(hours_since_boot);
-        st.cwl_data.supply_inlet_temp = cycle.outdoor;
-        st.cwl_data.exhaust_inlet_temp = cycle.indoor;
-        st.cwl_data.supply_outlet_temp = cycle.supply_outlet;
-        st.cwl_data.exhaust_outlet_temp = cycle.exhaust_outlet;
+        st.cwl_data.supply_temp = cycle.outdoor;
+        st.cwl_data.exhaust_temp = cycle.indoor;
 
         // Ventilation tracks requested level
         st.cwl_data.ventilation_level = st.requested_vent_level;
@@ -487,13 +457,8 @@ impl OtMaster {
         st.cwl_data.relative_ventilation = vent_map[idx];
 
         // Status
-        st.cwl_data.fault = false;
         st.cwl_data.ventilation_active = st.requested_bypass_open;
         st.cwl_data.filter_dirty = false;
-
-        // Simulated support flags
-        st.cwl_data.supports_id81 = true;
-        st.cwl_data.supports_id83 = true;
 
         // Simulated TSP values
         st.cwl_data.tsp_values[52] = 130;

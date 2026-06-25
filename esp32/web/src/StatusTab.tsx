@@ -58,7 +58,7 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
         <h3>{t(lang).ventilation}</h3>
         {status.extremeHeat.enabled && (() => {
           const lvl = status.extremeHeat.currentLevel
-          const d = status.temperature.supplyInlet - status.temperature.exhaustInlet
+          const d = status.temperature.supply - status.temperature.exhaust
           const dStr = `${d >= 0 ? '+' : ''}${d.toFixed(1)}`
           return (
             <div class="msg warning">
@@ -85,8 +85,8 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
       </div>
       <div class="card">
         <h3>{t(lang).temperatures}</h3>
-        <div class="stat"><span class="label">{t(lang).supplyInlet}</span><span class="value">{status.temperature.supplyInlet.toFixed(1)} °C</span></div>
-        <div class="stat"><span class="label">{t(lang).exhaustInlet}</span><span class="value">{status.temperature.exhaustInlet.toFixed(1)} °C</span></div>
+        <div class="stat"><span class="label">{t(lang).supply}</span><span class="value">{status.temperature.supply.toFixed(1)} °C</span></div>
+        <div class="stat"><span class="label">{t(lang).exhaust}</span><span class="value">{status.temperature.exhaust.toFixed(1)} °C</span></div>
       </div>
       <ExtremeHeatChart lang={lang} />
 
@@ -126,7 +126,6 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
       <div class="card">
         <h3>Status</h3>
         <div class="stat"><span class="label">Connected</span><span class={`value ${status.status.connected ? 'ok' : 'fault'}`}>{status.status.connected ? 'Yes' : 'No'}</span></div>
-        <div class="stat"><span class="label">Fault</span><span class={`value ${status.status.fault ? 'fault' : 'ok'}`}>{status.status.fault ? 'YES' : 'No'}</span></div>
         <div class="stat"><span class="label">Filter</span><span class={`value ${status.status.filter ? 'fault' : 'ok'}`}>{status.status.filter ? 'Replace' : 'OK'}</span></div>
         <div class="stat"><span class="label">Bypass</span><span class="value">{status.status.bypass ? 'Open' : 'Closed'}</span></div>
       </div>
