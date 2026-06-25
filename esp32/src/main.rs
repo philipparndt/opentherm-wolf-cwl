@@ -4,6 +4,7 @@ mod config_manager;
 mod cwl_data;
 mod display;
 mod encoder;
+mod extreme_heat;
 mod framebuffer;
 mod history;
 pub mod i18n;
@@ -296,6 +297,10 @@ fn main() {
         }
     }
 
+    // Extreme-heat automatic mode — drives the ventilation level from the
+    // supply-vs-exhaust temperature difference when enabled in config.
+    let mut extreme_heat = extreme_heat::ExtremeHeat::new(state.clone());
+
     // Watchdog
     let mut wdt = watchdog::Watchdog::new();
 
@@ -351,6 +356,11 @@ fn main() {
         // Scheduler
         sched.update(now_ms);
 
+        // Extreme-heat automatic mode (no-op unless enabled in config). Runs
+        // after the scheduler, which suppresses its own ventilation level
+        // changes while the mode owns requested_vent_level.
+        extreme_heat.update(now_ms);
+
         // Persist timed-off state to NVS when changed
         {
             let mut st = state.lock().unwrap();
@@ -377,6 +387,20 @@ fn main() {
             }
         }
 
+        // Persist ventilation + bypass schedules to NVS when changed via the web UI
+        {
+            let mut st = state.lock().unwrap();
+            if st.persist_schedules {
+                st.persist_schedules = false;
+                let schedules = st.schedules.clone();
+                let bypass_schedule = st.bypass_schedule.clone();
+                drop(st);
+                let mut mgr = config_manager::ConfigManager::new(nvs_partition.clone()).unwrap();
+                mgr.save_schedules(&schedules).ok();
+                mgr.save_bypass_schedule(&bypass_schedule).ok();
+            }
+        }
+
         // MQTT publishing now runs on its own thread (spawned above).
 
         // Watchdog (LED state itself is driven from the 5 ms inner loop below
@@ -396,6 +420,27 @@ fn main() {
             let rolled = st.temp_history.sample(now_ms, &st.cwl_data);
             if rolled {
                 display_dirty.store(true, Ordering::Relaxed);
+                // Persist the rolled-over history to the broker (retained).
+                st.mqtt_publish_history = true;
+            }
+        }
+
+        // Apply any RAM-only state recovered from retained MQTT snapshots. The
+        // MQTT callback only stashes raw bytes; the heavier JSON parse happens
+        // here on the main loop.
+        {
+            let mut st = state.lock().unwrap();
+            if let Some(bytes) = st.pending_history_json.take() {
+                let st = &mut *st;
+                if st.temp_history.restore_from_snapshot(&bytes) {
+                    display_dirty.store(true, Ordering::Relaxed);
+                    info!("MQTT recovery: temperature history restored");
+                }
+            }
+            if let Some(bytes) = st.pending_extreme_heat_json.take() {
+                let st = &mut *st;
+                extreme_heat::restore_snapshot(st, &bytes);
+                info!("MQTT recovery: extreme-heat markers restored");
             }
         }
 

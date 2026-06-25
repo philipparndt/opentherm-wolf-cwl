@@ -4,6 +4,7 @@ export interface Status {
   status: { fault: boolean; filter: boolean; bypass: boolean; connected: boolean }
   system: { uptime: number; freeHeap: number; version: string; mqttConnected: boolean; wifiRssi: number; simulated: boolean }
   timedOff: { active: boolean; remainingMinutes: number }
+  extremeHeat: { enabled: boolean; currentLevel: number; lastChangeEpoch: number }
   airflow: { reduced: number; normal: number; party: number }
 }
 
@@ -12,8 +13,20 @@ export interface Config {
   mqtt: { enabled: boolean; server: string; port: number; topic: string; authEnabled: boolean; username: string; password: string }
   web: { username: string; password: string }
   pins: { otIn: number; otOut: number; sda: number; scl: number; encClk: number; encDt: number; encSw: number }
+  extremeHeat?: { enabled: boolean }
   configured: boolean
   language?: string
+}
+
+export interface HistoryBucket { min: number; max: number }
+export interface HeatEvent { epoch: number; level: number }
+export interface History {
+  slots: number
+  bucketMs: number
+  nowEpoch: number
+  supply: (HistoryBucket | null)[]
+  exhaust: (HistoryBucket | null)[]
+  events: HeatEvent[]
 }
 
 async function request(url: string, options?: RequestInit) {
@@ -39,6 +52,11 @@ export async function getStatus(): Promise<Status> {
 
 export async function getConfig(): Promise<Config> {
   const res = await request('/api/config')
+  return res.json()
+}
+
+export async function getHistory(): Promise<History> {
+  const res = await request('/api/history')
   return res.json()
 }
 

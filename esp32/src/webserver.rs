@@ -63,13 +63,27 @@ fn content_type(path: &str) -> &'static str {
     else { "application/octet-stream" }
 }
 
+/// The web bundle ships with fixed filenames (app.js / style.css / index.html),
+/// not content-hashed ones, so they MUST revalidate after a filesystem OTA —
+/// otherwise the browser serves a stale app.js for up to the max-age and the
+/// new UI only shows after a force-reload. `no-cache` lets the browser keep a
+/// copy but forces a re-check on every load (we have no ETag, so it refetches).
+/// Immutable assets like the favicon can still be cached for a while.
+fn cache_control(path: &str) -> &'static str {
+    if path.ends_with(".html") || path.ends_with(".js") || path.ends_with(".css") {
+        "no-cache"
+    } else {
+        "public, max-age=3600"
+    }
+}
+
 fn serve_file(req: esp_idf_svc::http::server::Request<&mut EspHttpConnection>, path: &str) -> HandlerResult {
     match std::fs::read(path) {
         Ok(data) => {
             let ct = content_type(path);
             let mut resp = req.into_response(200, None, &[
                 ("Content-Type", ct),
-                ("Cache-Control", "public, max-age=3600"),
+                ("Cache-Control", cache_control(path)),
             ])?;
             resp.write_all(&data)?;
             Ok(())
@@ -78,7 +92,10 @@ fn serve_file(req: esp_idf_svc::http::server::Request<&mut EspHttpConnection>, p
             // SPA fallback: try index.html
             if path != "/www/index.html" {
                 if let Ok(data) = std::fs::read("/www/index.html") {
-                    let mut resp = req.into_response(200, None, &[("Content-Type", "text/html")])?;
+                    let mut resp = req.into_response(200, None, &[
+                        ("Content-Type", "text/html"),
+                        ("Cache-Control", "no-cache"),
+                    ])?;
                     resp.write_all(&data)?;
                     return Ok(());
                 }
@@ -157,6 +174,11 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
             "timedOff": {
                 "active": st.timed_off_active,
                 "remainingMinutes": st.timed_off_remaining_min,
+            },
+            "extremeHeat": {
+                "enabled": st.config.extreme_heat_enabled,
+                "currentLevel": st.eh_current_level,
+                "lastChangeEpoch": st.eh_last_change_epoch,
             },
             "airflow": {
                 "reduced": if d.tsp_valid[0] && d.tsp_valid[1] { (d.tsp_values[0] as u32) | ((d.tsp_values[1] as u32) << 8) } else { 100 },
@@ -259,6 +281,9 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "encDt": c.enc_dt_pin,
                 "encSw": c.enc_sw_pin,
             },
+            "extremeHeat": {
+                "enabled": c.extreme_heat_enabled,
+            },
             "configured": c.configured,
             "language": c.language.code(),
         });
@@ -310,6 +335,13 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 if let Some(v) = pins["encDt"].as_u64() { st.config.enc_dt_pin = v as u8; }
                 if let Some(v) = pins["encSw"].as_u64() { st.config.enc_sw_pin = v as u8; }
             }
+            // Extreme-heat mode toggle — persist so it survives reboot.
+            if let Some(eh) = val.get("extremeHeat") {
+                if let Some(v) = eh["enabled"].as_bool() {
+                    st.config.extreme_heat_enabled = v;
+                    st.persist_config = true;
+                }
+            }
             if let Some(v) = val["configured"].as_bool() { st.config.configured = v; }
             if let Some(v) = val["language"].as_str() { st.config.language = Language::from_code(v); }
             info!("Config updated via POST /api/config");
@@ -354,6 +386,9 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                     "encClk": c.enc_clk_pin,
                     "encDt": c.enc_dt_pin,
                     "encSw": c.enc_sw_pin,
+                },
+                "extremeHeat": {
+                    "enabled": c.extreme_heat_enabled,
                 },
                 "configured": c.configured,
             },
@@ -405,6 +440,9 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                     if let Some(v) = pins["encDt"].as_u64() { st.config.enc_dt_pin = v as u8; }
                     if let Some(v) = pins["encSw"].as_u64() { st.config.enc_sw_pin = v as u8; }
                 }
+                if let Some(eh) = cfg.get("extremeHeat") {
+                    if let Some(v) = eh["enabled"].as_bool() { st.config.extreme_heat_enabled = v; }
+                }
                 st.config.configured = true;
             }
 
@@ -422,6 +460,8 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 }
             }
 
+            st.persist_schedules = true;
+            st.persist_config = true;
             info!("Settings restored from backup");
             drop(st);
             return send_ok(req);
@@ -446,7 +486,9 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         if !is_authenticated(&req) { return send_unauthorized(req); }
         let body = read_body(&mut req);
         if let Ok(entries) = serde_json::from_slice::<Vec<crate::scheduler::ScheduleEntry>>(&body) {
-            s.lock().unwrap().schedules = entries;
+            let mut st = s.lock().unwrap();
+            st.schedules = entries;
+            st.persist_schedules = true;
             return send_ok(req);
         }
         let mut resp = req.into_response(400, None, &[("Content-Type", "application/json")])?;
@@ -469,7 +511,9 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         if !is_authenticated(&req) { return send_unauthorized(req); }
         let body = read_body(&mut req);
         if let Ok(schedule) = serde_json::from_slice::<crate::scheduler::BypassSchedule>(&body) {
-            s.lock().unwrap().bypass_schedule = schedule;
+            let mut st = s.lock().unwrap();
+            st.bypass_schedule = schedule;
+            st.persist_schedules = true;
             return send_ok(req);
         }
         let mut resp = req.into_response(400, None, &[("Content-Type", "application/json")])?;
@@ -531,6 +575,86 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         }
     })?;
 
+    // --- POST /api/ota/fs (filesystem OTA — rewrites the SPIFFS web-UI partition) ---
+    // The app-OTA handler above only touches the app partition; the web UI lives
+    // in the separate "spiffs" partition, so this endpoint streams a new SPIFFS
+    // image straight into it. It does NOT reboot — the caller is expected to push
+    // the firmware image afterwards (which reboots, remounting the new filesystem).
+    server.fn_handler("/api/ota/fs", Method::Post, move |mut req| -> HandlerResult {
+        if !is_authenticated(&req) { return send_unauthorized(req); }
+        use esp_idf_svc::sys::*;
+
+        // Locate the SPIFFS partition (label "spiffs", matching partitions.csv).
+        let label = b"spiffs\0";
+        let part = unsafe {
+            esp_partition_find_first(
+                esp_partition_type_t_ESP_PARTITION_TYPE_DATA,
+                esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_SPIFFS,
+                label.as_ptr() as *const _,
+            )
+        };
+        if part.is_null() {
+            let mut resp = req.into_response(500, None, &[("Content-Type", "application/json")])?;
+            resp.write_all(b"{\"error\":\"No SPIFFS partition\"}")?;
+            return Ok(());
+        }
+        let psize = unsafe { (*part).size } as usize;
+
+        // Unmount the live filesystem before rewriting it (best effort — it may
+        // already be unmounted). The web UI is unavailable until the device
+        // reboots, which the firmware OTA step that follows is expected to do.
+        unsafe { esp_vfs_spiffs_unregister(label.as_ptr() as *const _); }
+
+        let ret = unsafe { esp_partition_erase_range(part, 0, psize) };
+        if ret != ESP_OK {
+            let mut resp = req.into_response(500, None, &[("Content-Type", "application/json")])?;
+            resp.write_all(b"{\"error\":\"SPIFFS erase failed\"}")?;
+            return Ok(());
+        }
+
+        info!("OTA-FS: SPIFFS upload started ({} byte partition)", psize);
+        // Flash writes must be 4-byte aligned, so buffer into 4 KB blocks and
+        // only program whole blocks; pad the final short block to a word boundary.
+        let mut block = vec![0u8; 4096];
+        let mut fill: usize = 0;
+        let mut offset: usize = 0;
+        let mut overflow = false;
+        loop {
+            match req.read(&mut block[fill..]) {
+                Ok(0) => break,
+                Ok(n) => {
+                    fill += n;
+                    if fill == block.len() {
+                        if offset + fill > psize { overflow = true; break; }
+                        unsafe { esp_partition_write(part, offset, block.as_ptr() as *const _, fill); }
+                        offset += fill;
+                        fill = 0;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        if !overflow && fill > 0 {
+            while fill % 4 != 0 { block[fill] = 0xFF; fill += 1; }
+            if offset + fill <= psize {
+                unsafe { esp_partition_write(part, offset, block.as_ptr() as *const _, fill); }
+                offset += fill;
+            } else {
+                overflow = true;
+            }
+        }
+
+        if overflow {
+            info!("OTA-FS: image exceeds SPIFFS partition (>{} bytes)", psize);
+            let mut resp = req.into_response(400, None, &[("Content-Type", "application/json")])?;
+            resp.write_all(b"{\"error\":\"Image exceeds SPIFFS partition\"}")?;
+            return Ok(());
+        }
+
+        info!("OTA-FS: SPIFFS written ({} bytes), reboot to mount", offset);
+        send_ok(req)
+    })?;
+
     // --- GET /api/display (framebuffer for web OLED mirror) ---
     let s = state.clone();
     server.fn_handler("/api/display", Method::Get, move |req| -> HandlerResult {
@@ -540,6 +664,41 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         drop(st);
         let body = format!("{{\"width\":128,\"height\":64,\"data\":\"{}\"}}", b64);
         send_json_body(req, &body)
+    })?;
+
+    // --- GET /api/history (temperature history + extreme-heat change markers) ---
+    let s = state.clone();
+    server.fn_handler("/api/history", Method::Get, move |req| -> HandlerResult {
+        if !is_authenticated(&req) { return send_unauthorized(req); }
+        let st = s.lock().unwrap();
+        let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
+        let h = &st.temp_history;
+
+        // Oldest → newest, one entry per bucket. null = bucket not yet sampled.
+        let bucket_json = |b: Option<crate::history::Bucket>| match b {
+            Some(b) => json!({ "min": b.min, "max": b.max }),
+            None => serde_json::Value::Null,
+        };
+        let mut supply = Vec::with_capacity(crate::history::HISTORY_SLOTS);
+        let mut exhaust = Vec::with_capacity(crate::history::HISTORY_SLOTS);
+        for col in 0..crate::history::HISTORY_SLOTS {
+            supply.push(bucket_json(h.outdoor.slot_at_column(col)));
+            exhaust.push(bucket_json(h.indoor.slot_at_column(col)));
+        }
+        let events: Vec<_> = st.eh_events.iter()
+            .map(|e| json!({ "epoch": e.epoch, "level": e.level }))
+            .collect();
+
+        let body = json!({
+            "slots": crate::history::HISTORY_SLOTS,
+            "bucketMs": crate::history::BUCKET_MS,
+            "nowEpoch": now_epoch,
+            "supply": supply,
+            "exhaust": exhaust,
+            "events": events,
+        });
+        drop(st);
+        send_json_body(req, &body.to_string())
     })?;
 
     // --- Static file serving (web UI from SPIFFS) ---

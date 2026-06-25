@@ -107,10 +107,12 @@ impl Scheduler {
         self.last_eval_ms = now_ms;
 
         // Sync schedules from AppState (may have been updated via web UI)
+        let extreme_heat_enabled;
         {
             let st = self.state.lock().unwrap();
             self.schedules = st.schedules.clone();
             self.bypass_schedule = st.bypass_schedule.clone();
+            extreme_heat_enabled = st.config.extreme_heat_enabled;
         }
 
         let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
@@ -132,8 +134,10 @@ impl Scheduler {
             d => 1 << (d - 1),
         };
 
-        // Ventilation schedule
-        if !self.timed_off_active {
+        // Ventilation schedule — suppressed while extreme-heat mode owns the
+        // ventilation level (mutually exclusive). The bypass schedule below
+        // still runs since it controls the damper, not the fan level.
+        if !self.timed_off_active && !extreme_heat_enabled {
             let match_index = self.evaluate_ventilation(current_minutes, day_bit);
 
             if match_index != self.last_active_index {

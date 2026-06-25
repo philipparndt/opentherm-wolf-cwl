@@ -19,6 +19,8 @@ export interface Translations {
   current: string; temperatures: string
   supplyInlet: string; exhaustInlet: string; supplyOutlet: string; exhaustOutlet: string
   summer: string; winter: string; bypassMode: string
+  extremeHeatMode: string; extremeHeatHint: string
+  tempHistory: string; levelChanges: string; noHistoryYet: string
 }
 
 const en: Translations = {
@@ -108,6 +110,11 @@ const en: Translations = {
   summer: 'Summer',
   winter: 'Winter',
   bypassMode: 'Bypass',
+  extremeHeatMode: 'Extreme Heat Mode',
+  extremeHeatHint: 'Automatically lowers ventilation when incoming air is hotter than indoor air, and boosts it when incoming air is cooler. Decisions hold for 15 min.',
+  tempHistory: 'Temperature History (24h)',
+  levelChanges: 'Level changes',
+  noHistoryYet: 'Collecting data…',
 }
 
 const de: Translations = {
@@ -188,6 +195,11 @@ const de: Translations = {
   summer: 'Sommer',
   winter: 'Winter',
   bypassMode: 'Bypass',
+  extremeHeatMode: 'Extremhitze-Modus',
+  extremeHeatHint: 'Senkt die Lüftung automatisch, wenn die Zuluft wärmer als die Raumluft ist, und erhöht sie, wenn die Zuluft kühler ist. Entscheidungen gelten 15 Min.',
+  tempHistory: 'Temperaturverlauf (24h)',
+  levelChanges: 'Stufenwechsel',
+  noHistoryYet: 'Sammle Daten…',
 }
 
 const translations: Record<Lang, Translations> = { en, de }

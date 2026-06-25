@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'preact/hooks'
-import { resumeSchedule } from './api'
+import { resumeSchedule, saveConfig } from './api'
 import type { Status } from './api'
+import { ExtremeHeatChart } from './ExtremeHeatChart'
 import { t, type Lang } from './translations'
 
 export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirmed }: {
@@ -11,6 +12,7 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
   onConfirmed?: () => void
 }) {
   const [localPending, setLocalPending] = useState<number | null>(null)
+  const [ehEnabled, setEhEnabled] = useState(false)
 
   // Clear pending when CWL confirms the new level
   useEffect(() => {
@@ -19,6 +21,16 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
       onConfirmed?.()
     }
   }, [status?.ventilation.level, localPending])
+
+  // Reflect the persisted extreme-heat state as it arrives via polling.
+  useEffect(() => {
+    if (status?.extremeHeat) setEhEnabled(status.extremeHeat.enabled)
+  }, [status?.extremeHeat?.enabled])
+
+  const toggleExtremeHeat = async (v: boolean) => {
+    setEhEnabled(v) // optimistic; next poll confirms
+    await saveConfig({ extremeHeat: { enabled: v } })
+  }
 
   const handleLevelChange = (level: number) => {
     setLocalPending(level)
@@ -67,6 +79,18 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
         <div class="stat"><span class="label">{t(lang).supplyInlet}</span><span class="value">{status.temperature.supplyInlet.toFixed(1)} °C</span></div>
         <div class="stat"><span class="label">{t(lang).exhaustInlet}</span><span class="value">{status.temperature.exhaustInlet.toFixed(1)} °C</span></div>
       </div>
+      <div class="card">
+        <h3>{t(lang).extremeHeatMode}</h3>
+        <div class="toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" checked={ehEnabled} onChange={(e) => toggleExtremeHeat((e.target as HTMLInputElement).checked)} />
+            <span class="toggle-slider" />
+          </label>
+          <span>{ehEnabled ? 'On' : 'Off'}</span>
+        </div>
+        <p style="font-size:0.8em;color:var(--text-muted);margin-top:8px">{t(lang).extremeHeatHint}</p>
+      </div>
+      <ExtremeHeatChart lang={lang} />
       <div class="card">
         <h3>Status</h3>
         <div class="stat"><span class="label">Connected</span><span class={`value ${status.status.connected ? 'ok' : 'fault'}`}>{status.status.connected ? 'Yes' : 'No'}</span></div>

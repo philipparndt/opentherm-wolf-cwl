@@ -63,6 +63,7 @@ impl ConfigManager {
         // Ventilation state
         config.ventilation_level = self.get_i32("vent_level", 2) as u8;
         config.bypass_open = self.get_bool("bypass_open", false);
+        config.extreme_heat_enabled = self.get_bool("eh_enabled", false);
 
         // Language
         config.language = Language::from_u8(self.get_i32("language", 0) as u8);
@@ -102,6 +103,7 @@ impl ConfigManager {
         // Ventilation state
         self.set_i32("vent_level", config.ventilation_level as i32)?;
         self.set_bool("bypass_open", config.bypass_open)?;
+        self.set_bool("eh_enabled", config.extreme_heat_enabled)?;
 
         // Language
         self.set_i32("language", config.language as i32)?;
@@ -183,9 +185,19 @@ impl ConfigManager {
     // --- NVS helpers ---
 
     fn get_string(&self, key: &str, default: &str) -> String {
-        let mut buf = [0u8; 256];
-        match self.nvs.get_str(key, &mut buf) {
-            Ok(Some(s)) => s.trim_end_matches('\0').to_string(),
+        // Stored strings can exceed any fixed buffer — the schedules JSON grows
+        // with the number of entries (3 entries already exceed 256 bytes) — so
+        // size the read buffer to the value's actual length. A too-small buffer
+        // makes nvs_get_str fail and silently fall back to the default, which is
+        // how persisted schedules appeared "lost" on every reboot.
+        match self.nvs.str_len(key) {
+            Ok(Some(len)) if len > 0 => {
+                let mut buf = vec![0u8; len];
+                match self.nvs.get_str(key, &mut buf) {
+                    Ok(Some(s)) => s.trim_end_matches('\0').to_string(),
+                    _ => default.to_string(),
+                }
+            }
             _ => default.to_string(),
         }
     }

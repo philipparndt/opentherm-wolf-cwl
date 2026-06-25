@@ -287,6 +287,16 @@ impl Display {
                 HorizontalAlignment::Right, FontColor::Transparent(BinaryColor::On), d).ok();
         }
 
+        // Extreme-heat mode indicator — top-right, same row as the SIM tag.
+        // The mode owns the ventilation level (overriding the schedule) whenever
+        // it's enabled, so surface it here. Sits left of SIM in simulator builds
+        // so the two don't overlap.
+        if st.config.extreme_heat_enabled {
+            let x = if cfg!(feature = "simulate-ot") { 105 } else { 125 };
+            FONT_SMALL.render_aligned("EH", Point::new(x, 0), VerticalPosition::Top,
+                HorizontalAlignment::Right, FontColor::Transparent(BinaryColor::On), d).ok();
+        }
+
         // Dots indicator
         if edit_mode && edit_off_duration {
             // Off hours selection — no dots

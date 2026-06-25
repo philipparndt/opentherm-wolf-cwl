@@ -85,6 +85,10 @@ impl MqttManager {
             format!("{}/set/bypass", self.base_topic),
             format!("{}/set/filter_reset", self.base_topic),
             format!("{}/set/off_timer", self.base_topic),
+            // Retained persistence topics — subscribing pulls back any retained
+            // snapshot so the device can recover history/markers into RAM.
+            format!("{}/persist/temp_history", self.base_topic),
+            format!("{}/persist/extreme_heat", self.base_topic),
         ];
         for topic in &topics {
             if let Err(e) = self.client.subscribe(topic, QoS::AtMostOnce) {
@@ -120,6 +124,44 @@ impl MqttManager {
             self.last_health_ms = now_ms;
             self.publish_health_data();
         }
+
+        // Retained RAM-only state persistence — published only when a producer
+        // raised the flag (history bucket rollover / extreme-heat change), so we
+        // never wipe the broker's retained copy with an empty/initial snapshot.
+        let (do_history, do_extreme_heat) = {
+            let mut st = self.state.lock().unwrap();
+            let h = std::mem::take(&mut st.mqtt_publish_history);
+            let e = std::mem::take(&mut st.mqtt_publish_extreme_heat);
+            (h, e)
+        };
+        if do_history { self.publish_history_snapshot(); }
+        if do_extreme_heat { self.publish_extreme_heat_snapshot(); }
+    }
+
+    fn publish_history_snapshot(&mut self) {
+        let json = {
+            let st = self.state.lock().unwrap();
+            let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
+            st.temp_history.snapshot_json(now_epoch)
+        };
+        self.pub_retained("persist/temp_history", &json);
+    }
+
+    fn publish_extreme_heat_snapshot(&mut self) {
+        let json = {
+            let st = self.state.lock().unwrap();
+            let mut events = String::from("[");
+            for (i, e) in st.eh_events.iter().enumerate() {
+                if i > 0 { events.push(','); }
+                events.push_str(&format!("{{\"epoch\":{},\"level\":{}}}", e.epoch, e.level));
+            }
+            events.push(']');
+            format!(
+                "{{\"enabled\":{},\"currentLevel\":{},\"lastChangeEpoch\":{},\"events\":{}}}",
+                st.config.extreme_heat_enabled, st.eh_current_level, st.eh_last_change_epoch, events
+            )
+        };
+        self.pub_retained("persist/extreme_heat", &json);
     }
 
     fn publish_sensor_data(&mut self) {
@@ -209,8 +251,25 @@ fn handle_event(event: EspMqttEvent<'_>, state: &AppState, base_topic: &str) {
         }
         EventPayload::Received { topic, data, .. } => {
             if let Some(topic) = topic {
-                let msg = std::str::from_utf8(data).unwrap_or("");
-                handle_command(topic, msg, state, base_topic);
+                // Retained persistence snapshots: stash the raw bytes for the
+                // main loop to parse (no heavy JSON work on this callback thread)
+                // and apply only the FIRST one per topic after boot.
+                if topic.ends_with("/persist/temp_history") {
+                    let mut st = state.lock().unwrap();
+                    if !st.history_recovered {
+                        st.history_recovered = true;
+                        st.pending_history_json = Some(data.to_vec());
+                    }
+                } else if topic.ends_with("/persist/extreme_heat") {
+                    let mut st = state.lock().unwrap();
+                    if !st.extreme_heat_recovered {
+                        st.extreme_heat_recovered = true;
+                        st.pending_extreme_heat_json = Some(data.to_vec());
+                    }
+                } else {
+                    let msg = std::str::from_utf8(data).unwrap_or("");
+                    handle_command(topic, msg, state, base_topic);
+                }
             }
         }
         _ => {}

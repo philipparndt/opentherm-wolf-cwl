@@ -47,6 +47,10 @@ pub struct AppConfig {
     pub ventilation_level: u8,
     pub bypass_open: bool,
 
+    // Extreme-heat automatic mode (persisted). When enabled, ventilation level
+    // is driven automatically from the supply-vs-exhaust temperature difference.
+    pub extreme_heat_enabled: bool,
+
     // System
     pub configured: bool,
     pub language: Language,
@@ -75,6 +79,7 @@ impl Default for AppConfig {
             enc_sw_pin: 5,
             ventilation_level: 2, // Normal
             bypass_open: false,
+            extreme_heat_enabled: false,
             configured: false,
             language: Language::En,
         }
