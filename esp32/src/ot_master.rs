@@ -464,17 +464,21 @@ impl OtMaster {
 
     #[cfg(feature = "simulate-ot")]
     fn simulate(&mut self, now_ms: u32) {
-        let t = now_ms as f32 / 1000.0;
         let mut st = self.state.lock().unwrap();
 
         st.cwl_data.connected = true;
         st.cwl_data.last_response_ms = now_ms;
 
-        // Oscillating temperatures
-        st.cwl_data.supply_inlet_temp = 18.0 + 5.0 * (t / 60.0).sin();
-        st.cwl_data.exhaust_inlet_temp = 21.0 + 2.0 * (t / 45.0).sin();
-        st.cwl_data.supply_outlet_temp = 20.0 + 3.0 * (t / 50.0).sin();
-        st.cwl_data.exhaust_outlet_temp = 16.0 + 4.0 * (t / 55.0).sin();
+        // Use the same summer-day cycle the history preload writes, so the
+        // chart is continuous across the preload → live boundary. Boot
+        // corresponds to SIM_PEAK_HOUR; one hour of real time advances the
+        // simulated hour-of-day by one hour.
+        let hours_since_boot = now_ms as f32 / 3_600_000.0;
+        let cycle = crate::history::simulated_day_cycle(hours_since_boot);
+        st.cwl_data.supply_inlet_temp = cycle.outdoor;
+        st.cwl_data.exhaust_inlet_temp = cycle.indoor;
+        st.cwl_data.supply_outlet_temp = cycle.supply_outlet;
+        st.cwl_data.exhaust_outlet_temp = cycle.exhaust_outlet;
 
         // Ventilation tracks requested level
         st.cwl_data.ventilation_level = st.requested_vent_level;

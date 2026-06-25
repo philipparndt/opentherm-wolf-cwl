@@ -49,45 +49,39 @@ esp32-diyless/.embuild
 esp32-diyless/data
 esp32-diyless/web/node_modules
 
-# PCB
+# PCB — shared
 pcb/.venv
+pcb/.venv-3d
 pcb/__pycache__
-pcb/*.net
-pcb/*.xml
-pcb/*.svg
-pcb/*.kicad_prl
-pcb/*.kicad_pcb-bak
-pcb/*.kicad_sch-bak
-pcb/*-backups/
 pcb/fp-info-cache
+pcb/.history
+
+# PCB — KiCad local/generated (all variants)
+pcb/**/*.kicad_prl
+pcb/**/*.kicad_pcb-bak
+pcb/**/*.kicad_sch-bak
+pcb/**/*.net
+pcb/**/*.xml
+pcb/**/*.svg
 pcb/**/*.erc
 pcb/**/*.drc
-pcb/.venv-3d
-pcb/cwl/*.step
-pcb/cwl/*.stl
-pcb/cwl/cwl-backups
-pcb/cwl/.history
-*.lck
-pcb/.history
+pcb/**/*.step
+pcb/**/*.stl
+
+# PCB — per-variant output / local dirs
+# (pcba/ kept tracked so ordered-parts.md can be committed; *.csv and *.zip
+# inside it are caught by the global rules above.)
+pcb/*/gerber/
+pcb/*/plot/
+pcb/*/.history/
+pcb/*/cwl-backups/
+pcb/*/*-backups/
+pcb/*/cwl-gerber.zip
+
 wolf-cwl-core/target
+*.lck
 *.log
-pcb/cwl/gerber
-pcb/cwl/cwl-gerber.zip
 *.3mf
-pcb/cwl-diyless/cwl-backups
-pcb/cwl-full/wolf-cwl-shield-cwl-2.0-backups
-pcb/cwl-diyless/gerber
-pcb/cwl/wolf-cwl-shield-cwl-2.0-backups
-pcb/cwl-diyless/.history
-pcb/cwl-diyless/cwl-gerber.zip
+*.zip
 .idea
 out
-pcb/cwl-compact/cwl-backups
-pcb/cwl-compact/.history
-*.zip
-pcb/cwl-compact/gerber
-pcb/cwl-esp-onboard/gerber
-pcb/cwl-esp-onboard/.history
-pcb/cwl-diyless/.history
-pcb/cwl-esp-onboard/.history
-pcb/cwl-esp-onboard/.history

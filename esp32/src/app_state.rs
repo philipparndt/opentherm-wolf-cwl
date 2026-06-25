@@ -4,12 +4,14 @@ use std::sync::{Arc, Mutex};
 
 use crate::config::AppConfig;
 use crate::cwl_data::CwlData;
+use crate::history::TempHistory;
 use crate::scheduler::{ScheduleEntry, BypassSchedule};
 
 /// Mutable application state shared between main loop and HTTP handlers.
 #[derive(Debug)]
 pub struct AppStateInner {
     pub cwl_data: CwlData,
+    pub temp_history: TempHistory,
     pub config: AppConfig,
 
     // Requested state (set by web/MQTT, consumed by OT polling)
@@ -60,6 +62,7 @@ impl AppStateInner {
         let requested_bypass_open = config.bypass_open;
         Self {
             cwl_data: CwlData::new(),
+            temp_history: TempHistory::new(),
             requested_vent_level,
             requested_bypass_open,
             requested_filter_reset: false,

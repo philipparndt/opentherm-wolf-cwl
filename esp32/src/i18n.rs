@@ -101,6 +101,15 @@ pub struct Strings {
 
     // Timed off
     pub resumes_in: &'static str,
+
+    // Temperature history pages
+    pub outdoor_24h: &'static str,
+    pub indoor_24h: &'static str,
+    pub delta_24h: &'static str,
+    pub min_label: &'static str,
+    pub max_label: &'static str,
+    pub history_empty: &'static str,
+    pub celsius_unit: &'static str,
 }
 
 pub const EN: Strings = Strings {
@@ -164,6 +173,14 @@ pub const EN: Strings = Strings {
     deutsch: "Deutsch",
 
     resumes_in: "Resumes in",
+
+    outdoor_24h: "Outdoor 24h",
+    indoor_24h: "Indoor 24h",
+    delta_24h: "Gain 24h",
+    min_label: "Min",
+    max_label: "Max",
+    history_empty: "Collecting...",
+    celsius_unit: "C",
 };
 
 pub const DE: Strings = Strings {
@@ -227,6 +244,14 @@ pub const DE: Strings = Strings {
     deutsch: "Deutsch",
 
     resumes_in: "Weiter in",
+
+    outdoor_24h: "Au\u{df}en 24h",
+    indoor_24h: "Innen 24h",
+    delta_24h: "Gewinn 24h",
+    min_label: "Min",
+    max_label: "Max",
+    history_empty: "Sammle...",
+    celsius_unit: "C",
 };
 
 pub fn tr(lang: Language) -> &'static Strings {

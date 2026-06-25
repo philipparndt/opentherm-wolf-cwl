@@ -20,7 +20,8 @@ use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
 
 use crate::app_state::AppStateInner;
 use crate::framebuffer::FrameBuffer;
-use crate::i18n::{Language, tr, level_name};
+use crate::history::Channel;
+use crate::i18n::{Language, Strings, tr, level_name};
 
 #[cfg(not(feature = "display-sh1106"))]
 use ssd1306::mode::BufferedGraphicsMode;
@@ -51,7 +52,7 @@ fn clear_disp(d: &mut Disp) {
     { d.clear(); }
 }
 
-pub const PAGE_COUNT: usize = 6;
+pub const PAGE_COUNT: usize = 9;
 const STANDBY_TIMEOUT_MS: u32 = 300_000;
 const OVERLAY_TIMEOUT_MS: u32 = 10_000;
 const EDIT_TIMEOUT_MS: u32 = 10_000;
@@ -63,12 +64,19 @@ const FONT_MEDIUM: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB12_t
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Page {
-    Home = 0, Bypass, TempIn, Status, System, Settings,
+    Home = 0, Bypass, TempIn,
+    OutdoorHistory, IndoorHistory, DeltaHistory,
+    Status, System, Settings,
 }
 
 impl Page {
     fn from_index(i: usize) -> Self {
-        match i % PAGE_COUNT { 0 => Self::Home, 1 => Self::Bypass, 2 => Self::TempIn, 3 => Self::Status, 4 => Self::System, 5 => Self::Settings, _ => Self::Home }
+        match i % PAGE_COUNT {
+            0 => Self::Home, 1 => Self::Bypass, 2 => Self::TempIn,
+            3 => Self::OutdoorHistory, 4 => Self::IndoorHistory, 5 => Self::DeltaHistory,
+            6 => Self::Status, 7 => Self::System, 8 => Self::Settings,
+            _ => Self::Home,
+        }
     }
     fn index(self) -> usize { self as usize }
 }
@@ -264,6 +272,9 @@ impl Display {
                 Page::Home => draw_home(d, st, lang, edit_mode, edit_vent_level, edit_off_duration, edit_off_idx),
                 Page::Bypass => draw_bypass(d, st, lang, edit_mode, edit_vent_level),
                 Page::TempIn => draw_temp_in(d, st, lang),
+                Page::OutdoorHistory => draw_outdoor_history(d, st, lang),
+                Page::IndoorHistory => draw_indoor_history(d, st, lang),
+                Page::DeltaHistory => draw_delta_history(d, st, lang),
                 Page::Status => draw_status(d, st, lang),
                 Page::System => draw_system(d, st, lang),
                 Page::Settings => draw_settings(d, st, lang, edit_mode, edit_vent_level),
@@ -680,6 +691,98 @@ fn draw_settings(d: &mut impl DrawTarget<Color = BinaryColor>, _st: &AppStateInn
         let current = if lang == Language::En { s.english } else { s.deutsch };
         draw_centered(d, current, 30);
     }
+}
+
+fn draw_temp_chart(
+    d: &mut impl DrawTarget<Color = BinaryColor>,
+    channel: &Channel,
+    strings: &Strings,
+    show_zero_axis: bool,
+) {
+    let chart_top = 24i32;
+    let chart_bottom = 56i32;
+
+    let (lo, hi) = match channel.min_max() {
+        Some(v) => v,
+        None => {
+            // Empty placeholders for min/max strip; centred hint in chart area.
+            let strip = format!("{} --   {} --", strings.min_label, strings.max_label);
+            draw_small_centered(d, &strip, 14);
+            draw_small_centered(d, strings.history_empty, 36);
+            return;
+        }
+    };
+
+    let strip = format!(
+        "{} {:.1}{}   {} {:.1}{}",
+        strings.min_label, lo, strings.celsius_unit,
+        strings.max_label, hi, strings.celsius_unit,
+    );
+    draw_small_centered(d, &strip, 14);
+
+    let raw_range = hi - lo;
+    let range = raw_range.max(0.5);
+    let pad = (range - raw_range) / 2.0;
+    let mut eff_lo = lo - pad;
+    let mut eff_hi = hi + pad;
+    // For the gain chart, keep 0 °C inside the visible range so the
+    // zero axis is meaningful even when the data sits entirely above
+    // or below it.
+    if show_zero_axis {
+        if eff_lo > 0.0 { eff_lo = 0.0; }
+        if eff_hi < 0.0 { eff_hi = 0.0; }
+    }
+    let span = eff_hi - eff_lo;
+
+    let scale = |t: f32| -> i32 {
+        let frac = ((t - eff_lo) / span).clamp(0.0, 1.0);
+        let y = chart_bottom as f32 - frac * (chart_bottom - chart_top) as f32;
+        y.round() as i32
+    };
+
+    let stroke = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
+
+    // Dotted 0-axis behind the data — every other pixel so the data lines
+    // remain readable where they cross the axis.
+    if show_zero_axis {
+        let y0 = scale(0.0);
+        let pixels = (0..128i32)
+            .filter(|x| x % 2 == 0)
+            .map(move |x| Pixel(Point::new(x, y0), BinaryColor::On));
+        let _ = d.draw_iter(pixels);
+    }
+
+    for col in 0..128usize {
+        if let Some(b) = channel.slot_at_column(col) {
+            let y_top = scale(b.max);
+            let y_bottom = scale(b.min);
+            let x = col as i32;
+            if y_top == y_bottom {
+                let _ = d.draw_iter(core::iter::once(Pixel(Point::new(x, y_top), BinaryColor::On)));
+            } else {
+                Line::new(Point::new(x, y_top), Point::new(x, y_bottom))
+                    .into_styled(stroke).draw(d).ok();
+            }
+        }
+    }
+}
+
+fn draw_outdoor_history(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
+    let s = tr(lang);
+    draw_header(d, s.outdoor_24h);
+    draw_temp_chart(d, &st.temp_history.outdoor, s, false);
+}
+
+fn draw_indoor_history(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
+    let s = tr(lang);
+    draw_header(d, s.indoor_24h);
+    draw_temp_chart(d, &st.temp_history.indoor, s, false);
+}
+
+fn draw_delta_history(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {
+    let s = tr(lang);
+    draw_header(d, s.delta_24h);
+    draw_temp_chart(d, &st.temp_history.delta, s, true);
 }
 
 fn draw_system(d: &mut impl DrawTarget<Color = BinaryColor>, st: &AppStateInner, lang: Language) {

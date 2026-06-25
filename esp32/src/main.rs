@@ -5,6 +5,7 @@ mod cwl_data;
 mod display;
 mod encoder;
 mod framebuffer;
+mod history;
 pub mod i18n;
 mod mqtt;
 mod network;
@@ -383,6 +384,19 @@ fn main() {
         {
             let st = state.lock().unwrap();
             wdt.update(now_ms, st.cwl_data.last_response_ms, st.cwl_data.connected);
+        }
+
+        // Temperature history sampler — fold latest readings into 24 h
+        // ring buffers. Mark the display dirty only when a bucket rolls
+        // over (~once every 11 min) so we don't re-render the chart every
+        // second.
+        {
+            let mut st = state.lock().unwrap();
+            let st = &mut *st;
+            let rolled = st.temp_history.sample(now_ms, &st.cwl_data);
+            if rolled {
+                display_dirty.store(true, Ordering::Relaxed);
+            }
         }
 
         // Virtual encoder from web UI

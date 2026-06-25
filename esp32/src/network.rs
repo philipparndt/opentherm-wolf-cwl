@@ -175,10 +175,30 @@ pub fn check_network_connected() -> (bool, Option<String>) {
     (false, None)
 }
 
+/// Set the device timezone so `localtime_r` returns local time instead of UTC.
+///
+/// Without this the scheduler evaluates schedule windows in UTC while the web UI
+/// draws the "now" bar in browser-local time, so entries fire at the wrong hour.
+/// Europe/Berlin POSIX rule — handles CET/CEST DST transitions automatically.
+fn set_timezone() {
+    unsafe {
+        esp_idf_svc::sys::setenv(
+            b"TZ\0".as_ptr() as *const _,
+            b"CET-1CEST,M3.5.0,M10.5.0/3\0".as_ptr() as *const _,
+            1,
+        );
+        esp_idf_svc::sys::tzset();
+    }
+}
+
 /// Configure NTP time sync
 pub fn setup_ntp() {
     use esp_idf_svc::sntp::{EspSntp, SyncStatus};
     use std::time::Duration;
+
+    // Apply the timezone every time NTP (re)syncs so a fresh clock is always
+    // interpreted as Europe/Berlin local time.
+    set_timezone();
 
     info!("NTP: Syncing time...");
     if let Ok(sntp) = EspSntp::new_default() {

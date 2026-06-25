@@ -17,6 +17,19 @@ VARIANT ?= cwl
 KICAD_PROJECT := $(VARIANT)/cwl.kicad_pcb
 FREECADCMD := /Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd
 
+# Display socket substitution (PCBA export only — the board design is untouched).
+# The OLED connector (J3) keeps its OLED footprint on the board, which reserves
+# the space + mounting holes. In the pcba-full export we relabel J3's BOM line as
+# a 1x04 2.54mm female header so a display module can be plugged in, and drop it
+# from the CPL: the OLED footprint's origin is ~2-3cm from its header holes, so an
+# auto-placed socket would land in the wrong spot — it is hand-soldered instead.
+# Set DISPLAY_SOCKET_LCSC to an LCSC part number to populate the BOM's LCSC column.
+DISPLAY_REF ?= J3
+DISPLAY_SOCKET_COMMENT ?= PinSocket 1x04 P2.54mm (female)
+DISPLAY_SOCKET_FOOTPRINT ?= Connector_PinSocket_2.54mm:PinSocket_1x04_P2.54mm_Vertical
+# C2718488 = BOOMELE 2.54-1x4P female header (1x04, 2.54mm), JLCPCB parts library.
+DISPLAY_SOCKET_LCSC ?= C2718488
+
 # InteractiveHtmlBom: cloned to scripting/plugins/InteractiveHtmlBom (manual install).
 # PCM-installed copies live under 3rdparty/plugins/com_github_openscopeproject_InteractiveHtmlBom/plugin/
 # — override IBOM_SCRIPT if you used PCM instead.
@@ -28,7 +41,7 @@ export KICAD9_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSuppor
 export KICAD_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
 export KICAD10_3DMODEL_DIR ?= /Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels
 
-.PHONY: generate-3d export-stl-full export-stl-board export-stl-parts export-stl-parts-0.96 export-stl-parts-1.3 export-stl-print gerber plot-pdf pcba ibom clean setup-3d help
+.PHONY: generate-3d export-stl-full export-stl-board export-stl-parts export-stl-parts-0.96 export-stl-parts-1.3 export-stl-print gerber plot-pdf pcba pcba-full ibom clean setup-3d help
 
 help:
 	@echo "Wolf CWL Shield PCB"
@@ -42,7 +55,8 @@ help:
 	@echo "  make export-stl-parts-1.3  - Export components only with 1.3\" OLED  (cwl-diyless only — excludes J3)"
 	@echo "  make gerber           - Export Gerbers + drill files for fabrication"
 	@echo "  make plot-pdf         - Plot fabrication / assembly PDFs (front + back)"
-	@echo "  make pcba             - Export JLCPCB PCBA bundle (gerber + BOM + CPL)"
+	@echo "  make pcba             - Export JLCPCB PCBA bundle, SMD only (gerber + BOM + CPL)"
+	@echo "  make pcba-full        - Export JLCPCB PCBA bundle including through-hole parts"
 	@echo "  make ibom             - Generate Interactive HTML BOM (needs InteractiveHtmlBom plugin via PCM)"
 	@echo "  make clean            - Remove generated files and venv"
 	@echo ""
@@ -181,9 +195,15 @@ pcba: gerber
 		--exclude-dnp \
 		-o $(VARIANT)/pcba/cwl-cpl-raw.csv \
 		$(KICAD_PROJECT)
+	@# Index PosX/PosY/Rot/Side from the right: a footprint Package name may
+	@# contain a comma (e.g. Phoenix "MKDS-1,5-...") which would shift columns
+	@# counted from the left. The trailing position fields never contain commas.
+	@# Skip mounting holes (MH*) — not assembled parts. (Solder bridges SB* are
+	@# already excluded by their exclude_from_pos_files footprint attribute.)
 	@awk -F',' 'BEGIN{OFS=","} \
 		NR==1 {print "Designator,Mid X,Mid Y,Layer,Rotation"; next} \
-		{print $$1, $$4, $$5, $$7, $$6}' \
+		$$1 ~ /^"?MH[0-9]/ {next} \
+		{print $$1, $$(NF-3), $$(NF-2), $$NF, $$(NF-1)}' \
 		$(VARIANT)/pcba/cwl-cpl-raw.csv > $(VARIANT)/pcba/cwl-cpl.csv
 	@rm -f $(VARIANT)/pcba/cwl-cpl-raw.csv
 	$(KICAD_CLI) sch export bom \
@@ -204,6 +224,60 @@ pcba: gerber
 	@echo "Exported: $(VARIANT)/pcba/cwl-bom.csv"
 	@echo "Exported: $(VARIANT)/pcba/cwl-cpl.csv"
 	@echo "Exported: $(VARIANT)/pcba/cwl-gerber.zip"
+
+# JLCPCB PCBA bundle including through-hole parts (full assembly). Same as the
+# pcba target but without --exclude-fp-th, so the CPL — and the BOM rows derived
+# from it — also cover through-hole components. Outputs to $(VARIANT)/pcba-full/.
+# DNP parts are still excluded.
+pcba-full: gerber
+	@echo "Exporting JLCPCB PCBA files (full — SMD + through-hole)..."
+	@mkdir -p $(VARIANT)/pcba-full
+	$(KICAD_CLI) pcb export pos \
+		--format csv \
+		--units mm \
+		--use-drill-file-origin \
+		--side both \
+		--exclude-dnp \
+		-o $(VARIANT)/pcba-full/cwl-cpl-raw.csv \
+		$(KICAD_PROJECT)
+	@# Index PosX/PosY/Rot/Side from the right: a footprint Package name may
+	@# contain a comma (e.g. Phoenix "MKDS-1,5-...") which would shift columns
+	@# counted from the left. The trailing position fields never contain commas.
+	@# Skip mounting holes (MH*) — not assembled parts. (Solder bridges SB* are
+	@# already excluded by their exclude_from_pos_files footprint attribute.)
+	@# Also skip the display connector ($(DISPLAY_REF)) — hand-soldered, see header.
+	@awk -F',' 'BEGIN{OFS=","} \
+		NR==1 {print "Designator,Mid X,Mid Y,Layer,Rotation"; next} \
+		$$1 ~ /^"?MH[0-9]/ {next} \
+		$$1 ~ /^"?$(DISPLAY_REF)"?$$/ {next} \
+		{print $$1, $$(NF-3), $$(NF-2), $$NF, $$(NF-1)}' \
+		$(VARIANT)/pcba-full/cwl-cpl-raw.csv > $(VARIANT)/pcba-full/cwl-cpl.csv
+	@rm -f $(VARIANT)/pcba-full/cwl-cpl-raw.csv
+	$(KICAD_CLI) sch export bom \
+		--fields "Value,Reference,Footprint,LCSC" \
+		--labels "Comment,Designator,Footprint,LCSC Part #" \
+		--exclude-dnp \
+		-o $(VARIANT)/pcba-full/cwl-bom-raw.csv \
+		$(VARIANT)/cwl.kicad_sch
+	@# Keep BOM rows whose Designator is in the CPL, plus the hand-soldered display
+	@# connector ($(DISPLAY_REF)) which is intentionally not in the CPL.
+	@{ tail -n +2 $(VARIANT)/pcba-full/cwl-cpl.csv | cut -d',' -f1 | tr -d '"'; echo "$(DISPLAY_REF)"; } | sort -u > $(VARIANT)/pcba-full/.placed-refs
+	@awk -F',' 'NR==FNR {placed[$$1]=1; next} \
+		FNR==1 {print; next} \
+		{ref=$$2; gsub(/"/, "", ref); if (ref in placed) print}' \
+		$(VARIANT)/pcba-full/.placed-refs $(VARIANT)/pcba-full/cwl-bom-raw.csv \
+		> $(VARIANT)/pcba-full/cwl-bom.csv
+	@# Relabel the display connector's BOM row as the female socket to hand-solder.
+	@awk -F',' 'BEGIN{OFS=","} \
+		$$2 ~ /^"?$(DISPLAY_REF)"?$$/ {print "\"$(DISPLAY_SOCKET_COMMENT)\"", $$2, "\"$(DISPLAY_SOCKET_FOOTPRINT)\"", "\"$(DISPLAY_SOCKET_LCSC)\""; next} \
+		{print}' \
+		$(VARIANT)/pcba-full/cwl-bom.csv > $(VARIANT)/pcba-full/cwl-bom.tmp \
+		&& mv $(VARIANT)/pcba-full/cwl-bom.tmp $(VARIANT)/pcba-full/cwl-bom.csv
+	@rm -f $(VARIANT)/pcba-full/cwl-bom-raw.csv $(VARIANT)/pcba-full/.placed-refs
+	@cp $(VARIANT)/cwl-gerber.zip $(VARIANT)/pcba-full/
+	@echo "Exported: $(VARIANT)/pcba-full/cwl-bom.csv"
+	@echo "Exported: $(VARIANT)/pcba-full/cwl-cpl.csv"
+	@echo "Exported: $(VARIANT)/pcba-full/cwl-gerber.zip"
 
 ibom:
 	@echo "Generating Interactive HTML BOM..."
@@ -227,5 +301,5 @@ clean:
 	rm -f $(VARIANT)/cwl-assembly.stl $(VARIANT)/cwl-board.stl $(VARIANT)/cwl-parts.stl $(VARIANT)/cwl-parts-0.96.stl $(VARIANT)/cwl-parts-1.3.stl
 	rm -f $(VARIANT)/cwl-assembly.step $(VARIANT)/cwl-board.step $(VARIANT)/cwl-parts.step $(VARIANT)/cwl-parts-0.96.step $(VARIANT)/cwl-parts-1.3.step
 	rm -rf $(VARIANT)/gerber $(VARIANT)/cwl-gerber.zip
-	rm -rf $(VARIANT)/plot $(VARIANT)/bom $(VARIANT)/pcba
+	rm -rf $(VARIANT)/plot $(VARIANT)/bom $(VARIANT)/pcba $(VARIANT)/pcba-full
 	rm -rf __pycache__
