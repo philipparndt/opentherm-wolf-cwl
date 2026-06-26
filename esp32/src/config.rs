@@ -51,11 +51,12 @@ pub struct AppConfig {
     // is driven automatically from the supply-vs-exhaust temperature difference.
     pub extreme_heat_enabled: bool,
 
-    // Humidity-aware ventilation (persisted). MQTT humidity sensor topics:
-    // one or more indoor sensors and a single outdoor sensor. Moisture
+    // Humidity-aware ventilation (persisted). MQTT humidity sensor topics: one or
+    // more indoor sensors and one or more outdoor sensors. Each side is aggregated
+    // as the lowest temperature / highest humidity across its sensors. Moisture
     // protection is its own toggle, independent of extreme-heat mode.
     pub humidity_inside_topics: Vec<String>,
-    pub humidity_outside_topic: String,
+    pub humidity_outside_topics: Vec<String>,
     pub humidity_protection_enabled: bool,
 
     // System
@@ -88,7 +89,7 @@ impl Default for AppConfig {
             bypass_open: false,
             extreme_heat_enabled: false,
             humidity_inside_topics: Vec::new(),
-            humidity_outside_topic: String::new(),
+            humidity_outside_topics: Vec::new(),
             humidity_protection_enabled: false,
             configured: false,
             language: Language::En,

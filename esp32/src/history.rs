@@ -194,6 +194,9 @@ pub struct TempHistory {
     // Coarse humidity history (RH %), independent 5-min buckets.
     pub indoor_humidity: Channel,
     pub outdoor_humidity: Channel,
+    // Coarse specific-enthalpy history (kJ/kg), shares the humidity 5-min clock.
+    pub indoor_enthalpy: Channel,
+    pub outdoor_enthalpy: Channel,
     bucket_start_ms: u32,
     last_sample_ms: u32,
     humidity_bucket_start_ms: u32,
@@ -206,6 +209,8 @@ impl TempHistory {
             indoor: Channel::new(),
             indoor_humidity: Channel::with_len(HUMIDITY_SLOTS),
             outdoor_humidity: Channel::with_len(HUMIDITY_SLOTS),
+            indoor_enthalpy: Channel::with_len(HUMIDITY_SLOTS),
+            outdoor_enthalpy: Channel::with_len(HUMIDITY_SLOTS),
             bucket_start_ms: 0,
             last_sample_ms: 0,
             humidity_bucket_start_ms: 0,
@@ -273,18 +278,30 @@ impl TempHistory {
     }
 
     /// Fold the aggregated indoor/outdoor humidity (max indoor RH, outdoor RH)
-    /// into the coarse humidity channels. Independent 5-min buckets; `None`
-    /// values (no fresh sensor) simply aren't folded. Cheap to call each second.
-    pub fn sample_humidity(&mut self, now_ms: u32, indoor_rh: Option<f32>, outdoor_rh: Option<f32>) {
+    /// and specific enthalpy (kJ/kg) into the coarse channels. Independent 5-min
+    /// buckets shared by both metrics; `None` values (no fresh sensor) simply
+    /// aren't folded. Cheap to call each second.
+    pub fn sample_humidity(
+        &mut self,
+        now_ms: u32,
+        indoor_rh: Option<f32>,
+        outdoor_rh: Option<f32>,
+        indoor_h: Option<f32>,
+        outdoor_h: Option<f32>,
+    ) {
         if self.humidity_bucket_start_ms == 0 {
             self.humidity_bucket_start_ms = now_ms;
         } else if now_ms.wrapping_sub(self.humidity_bucket_start_ms) >= HUMIDITY_BUCKET_MS {
             self.indoor_humidity.advance();
             self.outdoor_humidity.advance();
+            self.indoor_enthalpy.advance();
+            self.outdoor_enthalpy.advance();
             self.humidity_bucket_start_ms = now_ms;
         }
         if let Some(rh) = indoor_rh { self.indoor_humidity.fold(rh); }
         if let Some(rh) = outdoor_rh { self.outdoor_humidity.fold(rh); }
+        if let Some(h) = indoor_h { self.indoor_enthalpy.fold(h); }
+        if let Some(h) = outdoor_h { self.outdoor_enthalpy.fold(h); }
     }
 
     /// Build the JSON payload for the web `/api/history` endpoint. The
@@ -292,11 +309,11 @@ impl TempHistory {
     /// full 1440-slot resolution the JSON was large enough that building it could
     /// exhaust the heap and crash the request. Built into a single pre-sized
     /// buffer with each array appended in place (no `format!`/intermediate copies).
-    pub fn full_json(&self, now_epoch: i64, events_json: &str) -> String {
+    pub fn full_json(&self, now_epoch: i64, events_json: &str, bypass_json: &str) -> String {
         // Half the temperature resolution: 720 columns over the 24 h window.
         let web_slots = HISTORY_SLOTS / 2;
         let web_bucket_ms = BUCKET_MS * (HISTORY_SLOTS / web_slots) as u32; // 2 min
-        let mut s = String::with_capacity((web_slots * 2 + HUMIDITY_SLOTS * 2) * 14 + events_json.len() + 256);
+        let mut s = String::with_capacity((web_slots * 2 + HUMIDITY_SLOTS * 4) * 14 + events_json.len() + bypass_json.len() + 256);
         s.push_str("{\"slots\":");
         s.push_str(&web_slots.to_string());
         s.push_str(",\"bucketMs\":");
@@ -315,8 +332,15 @@ impl TempHistory {
         self.indoor_humidity.append_json_array(&mut s);
         s.push_str(",\"outdoorHumidity\":");
         self.outdoor_humidity.append_json_array(&mut s);
+        // Enthalpy shares the humidity slot count / bucket interval (5-min grid).
+        s.push_str(",\"indoorEnthalpy\":");
+        self.indoor_enthalpy.append_json_array(&mut s);
+        s.push_str(",\"outdoorEnthalpy\":");
+        self.outdoor_enthalpy.append_json_array(&mut s);
         s.push_str(",\"events\":");
         s.push_str(events_json);
+        s.push_str(",\"bypass\":");
+        s.push_str(bypass_json);
         s.push('}');
         s
     }
@@ -324,11 +348,13 @@ impl TempHistory {
     /// Build the retained MQTT snapshot: a time-downsampled list of timestamped
     /// points `[epoch, sMin,sMax, eMin,eMax]` (null where a channel is missing).
     /// Because each point carries its own epoch, recovery re-bins by time and is
-    /// independent of the live resolution.
-    pub fn snapshot_json(&self, now_epoch: i64) -> String {
+    /// independent of the live resolution. `bypass_json` is a compact
+    /// `[[epoch,open01],…]` array of bypass transitions, embedded so the timeline
+    /// shading is restored alongside the curves it annotates.
+    pub fn snapshot_json(&self, now_epoch: i64, bypass_json: &str) -> String {
         let bsec = (BUCKET_MS / 1000) as i64;
         let newest = HISTORY_SLOTS - 1;
-        let mut s = String::with_capacity(MQTT_SNAPSHOT_POINTS * 52 + 32);
+        let mut s = String::with_capacity(MQTT_SNAPSHOT_POINTS * 52 + MQTT_HUMIDITY_POINTS * 104 + 64);
         s.push_str("{\"interval\":");
         s.push_str(&bsec.to_string());
         s.push_str(",\"points\":[");
@@ -376,7 +402,34 @@ impl TempHistory {
             push_pair(&mut s, outd);
             s.push(']');
         }
-        s.push_str("]}");
+        s.push(']');
+
+        // Specific-enthalpy history (kJ/kg). Shares the humidity 5-minute grid,
+        // emitted as its own epoch-stamped list so recovery re-bins it the same
+        // way. Only points where a channel has data are written.
+        s.push_str(",\"enthInterval\":");
+        s.push_str(&hbsec.to_string());
+        s.push_str(",\"enthPoints\":[");
+        let mut efirst = true;
+        for j in 0..MQTT_HUMIDITY_POINTS {
+            let lo = j * HUMIDITY_SLOTS / MQTT_HUMIDITY_POINTS;
+            let hi = ((j + 1) * HUMIDITY_SLOTS / MQTT_HUMIDITY_POINTS).max(lo + 1);
+            let ind = self.indoor_enthalpy.range_minmax(lo, hi);
+            let outd = self.outdoor_enthalpy.range_minmax(lo, hi);
+            if ind.is_none() && outd.is_none() { continue; }
+            let rep_col = hi.min(HUMIDITY_SLOTS) - 1;
+            let t = now_epoch - ((hnewest - rep_col) as i64) * hbsec;
+            if !efirst { s.push(','); }
+            efirst = false;
+            s.push('[');
+            s.push_str(&t.to_string());
+            push_pair(&mut s, ind);
+            push_pair(&mut s, outd);
+            s.push(']');
+        }
+        s.push_str("],\"bypass\":");
+        s.push_str(bypass_json);
+        s.push('}');
         s
     }
 
@@ -450,10 +503,16 @@ impl TempHistory {
                     ch.head = HUMIDITY_SLOTS - 1;
                     for slot in ch.slots.iter_mut() { *slot = None; }
                 }
+                // Bound the humidity scan so it doesn't ingest the following
+                // enthalpy (or trailing bypass) array's elements as humidity.
+                let hum_end = text.find("\"enthPoints\"")
+                    .or_else(|| text.find("\"bypass\""))
+                    .unwrap_or(text.len());
                 let mut hany = false;
                 let mut k = harr + 1;
                 while let Some(rel) = text[k..].find('[') {
                     let open = k + rel;
+                    if open >= hum_end { break; }
                     let close = match text[open..].find(']') { Some(c) => open + c, None => break };
                     let inner = &text[open + 1..close];
                     let mut it = inner.split(',');
@@ -484,6 +543,53 @@ impl TempHistory {
                 }
             }
         }
+
+        // Enthalpy points (optional — absent in snapshots from firmware that
+        // predates enthalpy history). Same 5-minute grid as humidity.
+        if let Some(epidx) = text.find("\"enthPoints\"") {
+            if let Some(earr) = text[epidx..].find('[').map(|x| epidx + x) {
+                let hbsec = (HUMIDITY_BUCKET_MS / 1000) as i64;
+                let hnewest = (HUMIDITY_SLOTS - 1) as i64;
+                for ch in [&mut self.indoor_enthalpy, &mut self.outdoor_enthalpy] {
+                    ch.head = HUMIDITY_SLOTS - 1;
+                    for slot in ch.slots.iter_mut() { *slot = None; }
+                }
+                // Bound the scan so the trailing "bypass" array isn't ingested.
+                let enth_end = text.find("\"bypass\"").unwrap_or(text.len());
+                let mut eany = false;
+                let mut k = earr + 1;
+                while let Some(rel) = text[k..].find('[') {
+                    let open = k + rel;
+                    if open >= enth_end { break; }
+                    let close = match text[open..].find(']') { Some(c) => open + c, None => break };
+                    let inner = &text[open + 1..close];
+                    let mut it = inner.split(',');
+                    let t = it.next().and_then(|x| x.trim().parse::<i64>().ok());
+                    let in_min = parse_opt(it.next());
+                    let in_max = parse_opt(it.next());
+                    let out_min = parse_opt(it.next());
+                    let out_max = parse_opt(it.next());
+                    if let Some(t) = t {
+                        let back = (now_epoch - t + hbsec / 2) / hbsec;
+                        let col = hnewest - back;
+                        if col >= 0 && col < HUMIDITY_SLOTS as i64 {
+                            let col = col as usize;
+                            if let (Some(a), Some(b)) = (in_min, in_max) {
+                                self.indoor_enthalpy.slots[col] = Some(Bucket { min: a, max: b }); eany = true;
+                            }
+                            if let (Some(a), Some(b)) = (out_min, out_max) {
+                                self.outdoor_enthalpy.slots[col] = Some(Bucket { min: a, max: b }); eany = true;
+                            }
+                        }
+                    }
+                    k = close + 1;
+                }
+                if eany {
+                    self.indoor_enthalpy.fill_gaps_forward();
+                    self.outdoor_enthalpy.fill_gaps_forward();
+                }
+            }
+        }
         any
     }
 }
@@ -501,6 +607,31 @@ fn push_pair(s: &mut String, b: Option<Bucket>) {
         Some(b) => s.push_str(&format!(",{:.2},{:.2}", b.min, b.max)),
         None => s.push_str(",null,null"),
     }
+}
+
+/// Parse the compact `"bypass":[[epoch,open01],…]` array out of a snapshot,
+/// returning `(epoch, open)` pairs oldest→newest. Bypass is the last field in
+/// the snapshot object (only `}` follows), so the scan runs to the end of the
+/// element list. Missing or malformed input yields an empty vec.
+pub fn parse_bypass_events(json: &[u8]) -> Vec<(i64, bool)> {
+    let text = match std::str::from_utf8(json) { Ok(t) => t, Err(_) => return Vec::new() };
+    let bidx = match text.find("\"bypass\"") { Some(i) => i, None => return Vec::new() };
+    let arr_start = match text[bidx..].find('[') { Some(i) => bidx + i, None => return Vec::new() };
+    let mut out = Vec::new();
+    let mut i = arr_start + 1;
+    while let Some(rel) = text[i..].find('[') {
+        let open = i + rel;
+        let close = match text[open..].find(']') { Some(c) => open + c, None => break };
+        let inner = &text[open + 1..close];
+        let mut it = inner.split(',');
+        let epoch = it.next().and_then(|x| x.trim().parse::<i64>().ok());
+        let flag = it.next().and_then(|x| x.trim().parse::<i64>().ok());
+        if let (Some(e), Some(f)) = (epoch, flag) {
+            out.push((e, f != 0));
+        }
+        i = close + 1;
+    }
+    out
 }
 
 /// Parse one comma-token as `Some(f32)` or `None` (for `null` / missing / bad).
@@ -585,11 +716,17 @@ mod tests {
         h.outdoor.fold(18.0); h.indoor.fold(21.0);
         h.outdoor.advance(); h.indoor.advance();
         h.outdoor.fold(19.5); h.indoor.fold(20.5);
+        // Enthalpy (kJ/kg) shares the coarse humidity grid.
+        h.indoor_enthalpy.fold(45.0); h.outdoor_enthalpy.fold(30.0);
 
         let now = 1_700_000_000;
-        let json = h.snapshot_json(now);
+        let json = h.snapshot_json(now, "[[1700000001,1],[1700000005,0]]");
         let mut h2 = TempHistory::new();
         assert!(h2.restore_from_snapshot(json.as_bytes(), now));
+
+        // Bypass transitions round-trip out of the same snapshot.
+        let bp = super::parse_bypass_events(json.as_bytes());
+        assert_eq!(bp, vec![(1_700_000_001, true), (1_700_000_005, false)]);
 
         // The newest column carries the (downsampled) recent values back.
         let newest = HISTORY_SLOTS - 1;
@@ -598,6 +735,39 @@ mod tests {
         assert!((o.min - 18.0).abs() < 0.05);
         let i = h2.indoor.slot_at_column(newest).unwrap();
         assert!((i.max - 21.0).abs() < 0.05);
+
+        // Enthalpy round-trips onto the coarse humidity grid (newest column).
+        let hnewest = HUMIDITY_SLOTS - 1;
+        let ie = h2.indoor_enthalpy.slot_at_column(hnewest).unwrap();
+        assert!((ie.max - 45.0).abs() < 0.05);
+        let oe = h2.outdoor_enthalpy.slot_at_column(hnewest).unwrap();
+        assert!((oe.max - 30.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn restore_without_enthalpy_points_is_backward_compatible() {
+        // A snapshot from firmware predating enthalpy: temperature + humidity
+        // lists, no "enthPoints". It must restore the older data and add no
+        // enthalpy, without error.
+        let now = 1_700_000_000;
+        let legacy = format!(
+            "{{\"interval\":60,\"points\":[[{},18.00,19.50,20.50,21.00]],\
+             \"humInterval\":300,\"humPoints\":[[{},40.00,42.00,55.00,58.00]],\
+             \"bypass\":[]}}",
+            now, now
+        );
+        let mut h = TempHistory::new();
+        assert!(h.restore_from_snapshot(legacy.as_bytes(), now));
+
+        // Temperature restored at its newest column.
+        let newest = HISTORY_SLOTS - 1;
+        assert!((h.outdoor.slot_at_column(newest).unwrap().max - 19.5).abs() < 0.05);
+        // Humidity restored at its newest column.
+        let hnewest = HUMIDITY_SLOTS - 1;
+        assert!((h.indoor_humidity.slot_at_column(hnewest).unwrap().max - 42.0).abs() < 0.05);
+        // No enthalpy data was added.
+        assert!(h.indoor_enthalpy.min_max().is_none());
+        assert!(h.outdoor_enthalpy.min_max().is_none());
     }
 
     #[test]
@@ -606,5 +776,18 @@ mod tests {
         let now = 1_700_000_000;
         assert!(!h.restore_from_snapshot(b"not json at all", now));
         assert!(!h.restore_from_snapshot(b"{}", now));
+    }
+
+    #[test]
+    fn parse_bypass_events_handles_missing_and_empty() {
+        assert!(super::parse_bypass_events(b"{}").is_empty());
+        assert!(super::parse_bypass_events(b"{\"bypass\":[]}").is_empty());
+        assert!(super::parse_bypass_events(b"not json").is_empty());
+    }
+
+    #[test]
+    fn parse_bypass_events_reads_pairs() {
+        let bp = super::parse_bypass_events(b"{\"points\":[],\"bypass\":[[100,1],[200,0]]}");
+        assert_eq!(bp, vec![(100, true), (200, false)]);
     }
 }

@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 
 use log::info;
 
-use crate::app_state::{AppStateInner, EhEvent, Reason, EH_EVENT_CAPACITY};
+use crate::app_state::{AppStateInner, EhEvent, HoldReason, Reason, EH_EVENT_CAPACITY};
 use crate::cwl_data::VentLevel;
 use crate::humidity;
 
@@ -36,10 +36,35 @@ pub const EH_OFF_DELTA: f32 = 0.5;
 pub const EH_PARTY_DELTA: f32 = -1.0;
 /// Minimum time a mode-driven decision is held before it can change again.
 pub const EH_DWELL_SECS: i64 = 15 * 60;
+/// Hysteresis band (°C) around supply==exhaust within which the bypass damper
+/// holds its current position, so readings hovering near equality don't cycle
+/// the mechanical damper.
+pub const EH_BYPASS_HYST: f32 = 0.5;
 
 /// Epoch threshold below which the wall clock is considered unsynced (NTP not
 /// yet acquired). Mirrors the guard used by the scheduler.
 const EPOCH_VALID: i64 = 1_700_000_000;
+
+/// Decide the bypass damper position from the supply/exhaust temperatures.
+///
+/// The CWL is a sensible recuperator, so the bypass only governs how much the
+/// heat exchanger conditions the incoming air:
+/// - supply (outdoor) cooler than exhaust (indoor) → **open**: let the cool
+///   outdoor air in unconditioned rather than re-warming it through the core.
+/// - supply warmer than exhaust → **closed**: let the core pre-cool the hot
+///   incoming air with the cool outgoing air ("recover coolth").
+///
+/// Within a [`EH_BYPASS_HYST`] band around equality the current position is
+/// held, so a reading hovering near equality doesn't cycle the damper.
+pub fn select_bypass(supply: f32, exhaust: f32, current_open: bool) -> bool {
+    if supply < exhaust - EH_BYPASS_HYST {
+        true
+    } else if supply > exhaust + EH_BYPASS_HYST {
+        false
+    } else {
+        current_open
+    }
+}
 
 /// Map the supply/exhaust temperature difference to a ventilation level.
 pub fn select_level(supply: f32, exhaust: f32) -> VentLevel {
@@ -92,6 +117,7 @@ impl ExtremeHeat {
         // Extreme-heat mode not owning the level. Moisture protection may still
         // run on its own as a surgical raise-only override.
         if !eh_on {
+            st.eh_hold = HoldReason::None; // the deadband/dwell hold is an EH-band concept
             if self.was_enabled {
                 self.was_enabled = false;
                 st.mqtt_publish_extreme_heat = true;
@@ -134,6 +160,21 @@ impl ExtremeHeat {
         let supply = st.cwl_data.supply_temp;
         let exhaust = st.cwl_data.exhaust_temp;
 
+        // Couple the bypass damper to the same outdoor/indoor temperature signal,
+        // independently of the fan-level decision below: open it for free cooling
+        // when the outdoor air is cooler, close it to recover coolth when the
+        // outdoor air is hotter. The scheduler's calendar bypass yields to us while
+        // extreme-heat is enabled. Only requested_bypass_open is touched (not the
+        // persisted config baseline), so automatic toggling doesn't wear flash.
+        let want_bypass = select_bypass(supply, exhaust, st.requested_bypass_open);
+        if want_bypass != st.requested_bypass_open {
+            st.set_bypass_open(want_bypass);
+            info!(
+                "ExtremeHeat: bypass -> {} supply {:.1} / exhaust {:.1}",
+                if want_bypass { "open" } else { "closed" }, supply, exhaust
+            );
+        }
+
         // Capture our baseline from the now-settled requested level (post-boot the
         // OT master has mirrored the unit's real level into it). The dwell timer
         // was zeroed on the rising edge, so the first genuine decision below still
@@ -148,11 +189,12 @@ impl ExtremeHeat {
         if st.requested_vent_level != st.eh_current_level {
             st.eh_current_level = st.requested_vent_level;
             st.eh_current_reason = Reason::Manual;
+            st.eh_hold = HoldReason::None;
             st.eh_last_change_epoch = now_epoch;
             return;
         }
 
-        let (level, reason) = decide(&st, now_ms, supply, exhaust, prot_on);
+        let (level, reason, dh) = decide(&st, now_ms, supply, exhaust, prot_on);
         // Never fully stop the fans: a fully-off CWL leaves stale air in the duct,
         // so the supply-inlet sensor no longer reads true outdoor temperature.
         // Floor the automatic decision at Reduced (manual Off is still honoured
@@ -160,9 +202,19 @@ impl ExtremeHeat {
         let level_u8 = (level as u8).max(VentLevel::Reduced as u8);
         if level_u8 == st.eh_current_level {
             st.eh_current_reason = reason; // keep level, refresh the reason for display
+            // Distinguish a deliberate hold in the neutral energy band from a
+            // plain "reduce" decision, so the UI can explain the non-switch.
+            st.eh_hold = match dh {
+                Some(dh) if humidity::deadband_holding(dh, st.eh_current_level) => HoldReason::Deadband,
+                _ => HoldReason::None,
+            };
             return;
         }
         if now_epoch - st.eh_last_change_epoch < EH_DWELL_SECS {
+            // A different level is due but the dwell hasn't elapsed — record what
+            // we'd switch to and how the UI can count it down.
+            st.eh_hold = HoldReason::Dwell;
+            st.eh_pending_level = level_u8;
             return; // dwell
         }
         record_change(&mut st, now_epoch, level_u8, reason);
@@ -223,18 +275,23 @@ fn decide(
     supply: f32,
     exhaust: f32,
     prot_on: bool,
-) -> (VentLevel, Reason) {
+) -> (VentLevel, Reason, Option<f32>) {
     match humidity::inputs(st, now_ms, exhaust, supply) {
         Some(inp) => {
             if prot_on {
                 if let Some(lvl) = humidity::protection_level(&inp, st.protection_active) {
-                    return (lvl, Reason::Dehumidify);
+                    return (lvl, Reason::Dehumidify, None);
                 }
             }
-            let (lvl, cooling) = humidity::enthalpy_level(&inp);
-            (lvl, if cooling { Reason::CoolingAssist } else { Reason::MuggySuppression })
+            // Carry the previous cooling state so the hold-down↔cooling choice is
+            // hysteretic around Δh = 0 instead of flipping on sensor noise.
+            let was_cooling = st.eh_current_reason == Reason::CoolingAssist;
+            let (lvl, cooling) = humidity::enthalpy_level(&inp, was_cooling);
+            let dh = inp.outdoor.h - inp.indoor.h;
+            let reason = if cooling { Reason::CoolingAssist } else { Reason::MuggySuppression };
+            (lvl, reason, Some(dh))
         }
-        None => (select_level(supply, exhaust), Reason::TempDelta),
+        None => (select_level(supply, exhaust), Reason::TempDelta, None),
     }
 }
 
@@ -243,6 +300,7 @@ fn record_change(st: &mut AppStateInner, now_epoch: i64, level: u8, reason: Reas
     st.requested_vent_level = level;
     st.eh_current_level = level;
     st.eh_current_reason = reason;
+    st.eh_hold = HoldReason::None; // a switch just applied: nothing withheld
     st.eh_last_change_epoch = now_epoch;
     st.initial_level_known = true;
     if st.eh_events.len() >= EH_EVENT_CAPACITY {
@@ -281,7 +339,7 @@ pub fn restore_snapshot(st: &mut AppStateInner, json: &[u8]) {
 
 #[cfg(test)]
 mod tests {
-    use super::select_level;
+    use super::{select_bypass, select_level};
     use crate::cwl_data::VentLevel;
 
     #[test]
@@ -329,5 +387,33 @@ mod tests {
     #[test]
     fn boundary_just_past_minus_one_is_party() {
         assert_eq!(select_level(20.99, 22.0), VentLevel::Party);
+    }
+
+    #[test]
+    fn bypass_opens_when_outdoor_clearly_cooler() {
+        // supply 20 < exhaust 24 - 0.5 → open for free cooling (prior state ignored)
+        assert!(select_bypass(20.0, 24.0, false));
+    }
+
+    #[test]
+    fn bypass_closes_when_outdoor_clearly_hotter() {
+        // supply 30 > exhaust 24 + 0.5 → closed to recover coolth
+        assert!(!select_bypass(30.0, 24.0, true));
+    }
+
+    #[test]
+    fn bypass_holds_position_within_hysteresis() {
+        // |supply - exhaust| <= 0.5 → keep whatever it was, don't cycle the damper
+        assert!(select_bypass(24.3, 24.0, true));
+        assert!(!select_bypass(24.3, 24.0, false));
+        assert!(select_bypass(23.7, 24.0, true));
+        assert!(!select_bypass(23.7, 24.0, false));
+    }
+
+    #[test]
+    fn bypass_boundary_exactly_half_holds() {
+        // exactly at the band edge is not strictly past it → hold
+        assert!(select_bypass(24.5, 24.0, true));
+        assert!(!select_bypass(23.5, 24.0, false));
     }
 }

@@ -24,12 +24,16 @@ export interface Translations {
   ehRules: readonly string[]
   tempHistory: string; levelChanges: string; noHistoryYet: string
   legendMeasurements: string; legendReason: string
+  legendBypass: string; bypassOpen: string; bypassClosed: string
+  now: string
   // Humidity-aware ventilation
   climateDecision: string; activeRule: string
   humiditySensors: string; humiditySensorsHint: string
-  moistureProtection: string; outdoorSensorTopic: string; indoorSensorTopics: string; addIndoorSensor: string
+  moistureProtection: string; outdoorSensorTopics: string; outdoorSensorTopicsHint: string; addOutdoorSensor: string; indoorSensorTopics: string; addIndoorSensor: string
   indoorRh: string; outdoorRh: string; ambientPressure: string
-  indoorAir: string; outdoorAir: string
+  indoorEnthalpy: string; outdoorEnthalpy: string
+  indoorAir: string; outdoorAir: string; aggregateHint: string
+  holdDeadband: string; holdDwell: string
   protectionActiveMsg: string; tempOnlyFallback: string
   reasonLabels: { temp: string; cooling: string; dehumidify: string; muggy: string; manual: string; schedule: string; reboot: string }
   reasonText: { temp: string; cooling: string; dehumidify: string; muggy: string; manual: string }
@@ -123,7 +127,7 @@ const en: Translations = {
   bypassMode: 'Bypass',
   extremeHeatMode: 'Extreme Heat Mode',
   extremeHeatHint: 'Automatically lowers ventilation when incoming air is hotter than indoor air, and boosts it when incoming air is cooler. Decisions hold for 15 min.',
-  extremeHeatOverridesSchedules: 'Extreme heat mode is active and controls the ventilation level automatically. The schedules below are overridden and have no effect until it is turned off.',
+  extremeHeatOverridesSchedules: 'Extreme heat mode is active and controls the ventilation level and bypass automatically. The schedules below are overridden and have no effect until it is turned off.',
   extremeHeatActive: 'Extreme heat mode active',
   extremeHeatForcedTo: 'Ventilation forced to',
   extremeHeatMatchedRule: 'Matched rule',
@@ -138,19 +142,30 @@ const en: Translations = {
   noHistoryYet: 'Collecting data…',
   legendMeasurements: 'Measurements',
   legendReason: 'Change reason',
+  legendBypass: 'Bypass',
+  bypassOpen: 'Open (free cooling)',
+  bypassClosed: 'Closed (heat recovery)',
+  now: 'Now',
   climateDecision: 'Climate Decision',
   activeRule: 'Active rule',
   humiditySensors: 'Humidity Sensors',
   humiditySensorsHint: 'MQTT topics publishing JSON with humidity / temperature / pressure. Used by extreme-heat mode (energy-based cooling) and moisture protection.',
   moistureProtection: 'Moisture protection (year-round)',
-  outdoorSensorTopic: 'Outdoor sensor topic',
+  outdoorSensorTopics: 'Outdoor sensor topics',
+  outdoorSensorTopicsHint: 'Add several — the decision uses the lowest temperature and highest humidity across them.',
+  addOutdoorSensor: '+ Add outdoor sensor',
   indoorSensorTopics: 'Indoor sensor topics',
   addIndoorSensor: '+ Add indoor sensor',
   indoorRh: 'Indoor RH',
   outdoorRh: 'Outdoor RH',
   ambientPressure: 'Ambient pressure',
-  indoorAir: 'Indoor (RH / AH / h)',
-  outdoorAir: 'Outdoor (RH / AH / h)',
+  indoorEnthalpy: 'Indoor h',
+  outdoorEnthalpy: 'Outdoor h',
+  indoorAir: 'Indoor (T / RH / AH / h)',
+  outdoorAir: 'Outdoor (T / RH / AH / h)',
+  aggregateHint: 'Per side: lowest temperature and highest RH; AH/enthalpy are from the wettest sensor re-expressed at that temperature — so these figures can come from different sensors and need not reconcile as one reading.',
+  holdDeadband: 'Holding — outdoor and indoor energy are within the neutral band (Δh {dh} kJ/kg); not switching on sensor noise.',
+  holdDwell: 'Would switch to {level} in {time} (dwell).',
   protectionActiveMsg: 'Moisture protection is actively ventilating.',
   tempOnlyFallback: 'Using temperature only — humidity data is missing or stale.',
   reasonLabels: { temp: 'Temperature', cooling: 'Cooling assist', dehumidify: 'Moisture protection', muggy: 'Muggy suppression', manual: 'Manual', schedule: 'Schedule', reboot: 'Reboot' },
@@ -242,7 +257,7 @@ const de: Translations = {
   bypassMode: 'Bypass',
   extremeHeatMode: 'Extremhitze-Modus',
   extremeHeatHint: 'Senkt die Lüftung automatisch, wenn die Zuluft wärmer als die Raumluft ist, und erhöht sie, wenn die Zuluft kühler ist. Entscheidungen gelten 15 Min.',
-  extremeHeatOverridesSchedules: 'Der Extremhitze-Modus ist aktiv und steuert die Lüftungsstufe automatisch. Die Zeitpläne unten werden überschrieben und haben keine Wirkung, bis er ausgeschaltet wird.',
+  extremeHeatOverridesSchedules: 'Der Extremhitze-Modus ist aktiv und steuert die Lüftungsstufe und den Bypass automatisch. Die Zeitpläne unten werden überschrieben und haben keine Wirkung, bis er ausgeschaltet wird.',
   extremeHeatActive: 'Extremhitze-Modus aktiv',
   extremeHeatForcedTo: 'Lüftung erzwungen auf',
   extremeHeatMatchedRule: 'Zutreffende Regel',
@@ -257,19 +272,30 @@ const de: Translations = {
   noHistoryYet: 'Sammle Daten…',
   legendMeasurements: 'Messwerte',
   legendReason: 'Auslöser',
+  legendBypass: 'Bypass',
+  bypassOpen: 'Offen (Kühlung)',
+  bypassClosed: 'Geschlossen (Wärmerückgewinnung)',
+  now: 'Jetzt',
   climateDecision: 'Klima-Entscheidung',
   activeRule: 'Aktive Regel',
   humiditySensors: 'Feuchtesensoren',
   humiditySensorsHint: 'MQTT-Topics mit JSON-Feldern humidity / temperature / pressure. Genutzt von Extremhitze-Modus (energiebasierte Kühlung) und Feuchteschutz.',
   moistureProtection: 'Feuchteschutz (ganzjährig)',
-  outdoorSensorTopic: 'Außensensor-Topic',
+  outdoorSensorTopics: 'Außensensor-Topics',
+  outdoorSensorTopicsHint: 'Mehrere möglich — die Entscheidung nutzt die niedrigste Temperatur und höchste Feuchte daraus.',
+  addOutdoorSensor: '+ Außensensor hinzufügen',
   indoorSensorTopics: 'Innensensor-Topics',
   addIndoorSensor: '+ Innensensor hinzufügen',
   indoorRh: 'Innen rel. F.',
   outdoorRh: 'Außen rel. F.',
+  indoorEnthalpy: 'Innen h',
+  outdoorEnthalpy: 'Außen h',
   ambientPressure: 'Luftdruck',
-  indoorAir: 'Innen (rF / AF / h)',
-  outdoorAir: 'Außen (rF / AF / h)',
+  indoorAir: 'Innen (T / rF / AF / h)',
+  outdoorAir: 'Außen (T / rF / AF / h)',
+  aggregateHint: 'Je Seite: niedrigste Temperatur und höchste rF; AF/Enthalpie stammen vom feuchtesten Sensor, umgerechnet auf diese Temperatur — die Werte können also von verschiedenen Sensoren kommen und müssen sich nicht zu einem Zustand zusammenfügen.',
+  holdDeadband: 'Wird gehalten — Außen- und Innenenergie liegen im neutralen Band (Δh {dh} kJ/kg); kein Umschalten auf Sensorrauschen.',
+  holdDwell: 'Würde in {time} auf {level} wechseln (Dwell).',
   protectionActiveMsg: 'Feuchteschutz lüftet aktiv.',
   tempOnlyFallback: 'Nur Temperatur — Feuchtedaten fehlen oder sind veraltet.',
   reasonLabels: { temp: 'Temperatur', cooling: 'Kühlung', dehumidify: 'Feuchteschutz', muggy: 'Schwül-Stopp', manual: 'Manuell', schedule: 'Zeitplan', reboot: 'Neustart' },

@@ -68,7 +68,15 @@ impl ConfigManager {
         // Humidity sensors / moisture protection
         config.humidity_inside_topics =
             serde_json::from_str(&self.get_string("hum_in_topics", "[]")).unwrap_or_default();
-        config.humidity_outside_topic = self.get_string("hum_out_topic", "");
+        config.humidity_outside_topics =
+            serde_json::from_str(&self.get_string("hum_out_topics", "[]")).unwrap_or_default();
+        // Migrate the legacy single outdoor-topic key written by older firmware.
+        if config.humidity_outside_topics.is_empty() {
+            let legacy = self.get_string("hum_out_topic", "");
+            if !legacy.is_empty() {
+                config.humidity_outside_topics = vec![legacy];
+            }
+        }
         config.humidity_protection_enabled = self.get_bool("hum_protect", false);
 
         // Language
@@ -114,7 +122,8 @@ impl ConfigManager {
         // Humidity sensors / moisture protection
         let in_topics = serde_json::to_string(&config.humidity_inside_topics).unwrap_or_else(|_| "[]".into());
         self.set_string("hum_in_topics", &in_topics)?;
-        self.set_string("hum_out_topic", &config.humidity_outside_topic)?;
+        let out_topics = serde_json::to_string(&config.humidity_outside_topics).unwrap_or_else(|_| "[]".into());
+        self.set_string("hum_out_topics", &out_topics)?;
         self.set_bool("hum_protect", config.humidity_protection_enabled)?;
 
         // Language

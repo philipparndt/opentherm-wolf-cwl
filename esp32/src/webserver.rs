@@ -55,6 +55,24 @@ fn send_json_body(req: esp_idf_svc::http::server::Request<&mut EspHttpConnection
     Ok(())
 }
 
+/// Parse a list of sensor topics from `obj[array_key]` (array of strings),
+/// accepting a legacy single-string `obj[legacy_key]` for backward compatibility.
+/// Returns `None` if neither key is present (so the caller leaves config untouched).
+fn parse_topics(obj: &serde_json::Value, array_key: &str, legacy_key: &str) -> Option<Vec<String>> {
+    if let Some(arr) = obj[array_key].as_array() {
+        return Some(
+            arr.iter()
+                .filter_map(|t| t.as_str().map(|s| s.to_string()))
+                .filter(|s| !s.is_empty())
+                .collect(),
+        );
+    }
+    if let Some(v) = obj[legacy_key].as_str() {
+        return Some(if v.is_empty() { Vec::new() } else { vec![v.to_string()] });
+    }
+    None
+}
+
 fn content_type(path: &str) -> &'static str {
     if path.ends_with(".js") { "application/javascript" }
     else if path.ends_with(".css") { "text/css" }
@@ -157,9 +175,9 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "fresh": crate::humidity::is_fresh(sm.updated_ms, now_ms),
             }));
         }
-        if let Some(sm) = st.humidity_outside.as_ref() {
+        for (topic, sm) in st.humidity_outside.iter() {
             sensors.push(json!({
-                "topic": st.config.humidity_outside_topic, "role": "outdoor",
+                "topic": topic, "role": "outdoor",
                 "humidity": sm.humidity, "temperature": sm.temperature, "pressure": sm.pressure,
                 "fresh": crate::humidity::is_fresh(sm.updated_ms, now_ms),
             }));
@@ -167,6 +185,10 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         let hum_json = json!({
             "active": inp.is_some(),
             "ambientPressureKpa": st.ambient_pressure_kpa,
+            // The aggregated values actually fed to the climate decision: lowest
+            // temperature and highest humidity across each side's sensors.
+            "indoorTemp": inp.as_ref().map(|i| i.indoor.temp),
+            "outdoorTemp": inp.as_ref().map(|i| i.outdoor.temp),
             "indoorRh": inp.as_ref().map(|i| i.indoor.rh),
             "outdoorRh": inp.as_ref().map(|i| i.outdoor.rh),
             "indoorAh": inp.as_ref().map(|i| i.indoor.ah),
@@ -214,6 +236,19 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "reason": st.eh_current_reason.as_str(),
                 "protectionEnabled": st.config.humidity_protection_enabled,
                 "protectionActive": st.protection_active,
+                // Why a switch is being withheld (if at all), so the explainer can
+                // say so instead of looking stuck. "dwell" carries the level it
+                // will switch to and the remaining countdown.
+                "holdReason": st.eh_hold.as_str(),
+                "pendingLevel": st.eh_pending_level,
+                "dwellRemainingSecs": if st.eh_hold == crate::app_state::HoldReason::Dwell {
+                    (crate::extreme_heat::EH_DWELL_SECS
+                        - (unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64
+                            - st.eh_last_change_epoch))
+                        .max(0)
+                } else {
+                    0
+                },
             },
             "humidity": hum_json,
             "airflow": {
@@ -323,7 +358,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
             },
             "humidity": {
                 "insideTopics": c.humidity_inside_topics,
-                "outsideTopic": c.humidity_outside_topic,
+                "outsideTopics": c.humidity_outside_topics,
                 "protectionEnabled": c.humidity_protection_enabled,
             },
             "configured": c.configured,
@@ -391,8 +426,8 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                         arr.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect();
                     st.persist_config = true;
                 }
-                if let Some(v) = h["outsideTopic"].as_str() {
-                    st.config.humidity_outside_topic = v.to_string();
+                if let Some(topics) = parse_topics(h, "outsideTopics", "outsideTopic") {
+                    st.config.humidity_outside_topics = topics;
                     st.persist_config = true;
                 }
                 if let Some(v) = h["protectionEnabled"].as_bool() {
@@ -450,7 +485,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 },
                 "humidity": {
                     "insideTopics": c.humidity_inside_topics,
-                    "outsideTopic": c.humidity_outside_topic,
+                    "outsideTopics": c.humidity_outside_topics,
                     "protectionEnabled": c.humidity_protection_enabled,
                 },
                 "configured": c.configured,
@@ -511,7 +546,9 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                         st.config.humidity_inside_topics =
                             arr.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect();
                     }
-                    if let Some(v) = h["outsideTopic"].as_str() { st.config.humidity_outside_topic = v.to_string(); }
+                    if let Some(topics) = parse_topics(h, "outsideTopics", "outsideTopic") {
+                        st.config.humidity_outside_topics = topics;
+                    }
                     if let Some(v) = h["protectionEnabled"].as_bool() { st.config.humidity_protection_enabled = v; }
                 }
                 st.config.configured = true;
@@ -770,7 +807,17 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         }
         events.push(']');
 
-        let body = st.temp_history.full_json(now_epoch, &events);
+        // Bypass transitions for the timeline background shading.
+        let mut bypass = String::from("[");
+        for (i, e) in st.bypass_events.iter().enumerate() {
+            if i > 0 { bypass.push(','); }
+            bypass.push_str(&format!(
+                "{{\"epoch\":{},\"open\":{}}}", e.epoch, e.open
+            ));
+        }
+        bypass.push(']');
+
+        let body = st.temp_history.full_json(now_epoch, &events, &bypass);
         drop(st);
         send_json_body(req, &body)
     })?;
@@ -784,7 +831,13 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         if !is_authenticated(&req) { return send_unauthorized(req); }
         let st = s.lock().unwrap();
         let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
-        let body = st.temp_history.snapshot_json(now_epoch);
+        let mut bypass = String::from("[");
+        for (i, e) in st.bypass_events.iter().enumerate() {
+            if i > 0 { bypass.push(','); }
+            bypass.push_str(&format!("[{},{}]", e.epoch, if e.open { 1 } else { 0 }));
+        }
+        bypass.push(']');
+        let body = st.temp_history.snapshot_json(now_epoch, &bypass);
         drop(st);
         send_json_body(req, &body)
     })?;
@@ -804,6 +857,14 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         let ok = {
             let mut st = s.lock().unwrap();
             let applied = st.temp_history.restore_from_snapshot(&body, now_epoch);
+            // Restore the bypass transitions for the timeline shading too.
+            let bypass = crate::history::parse_bypass_events(&body);
+            if !bypass.is_empty() {
+                st.bypass_events.clear();
+                for (epoch, open) in bypass {
+                    st.bypass_events.push_back(crate::app_state::BypassEvent { epoch, open });
+                }
+            }
             // Push the restored history straight back to the broker as the new
             // retained copy so it survives the next reboot.
             if applied { st.mqtt_publish_history = true; }

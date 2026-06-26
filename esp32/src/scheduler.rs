@@ -168,8 +168,10 @@ impl Scheduler {
             }
         }
 
-        // Bypass schedule
-        if self.bypass_schedule.enabled {
+        // Bypass schedule — suppressed while extreme-heat mode owns the damper
+        // (it drives the bypass from live supply/exhaust temperatures; see
+        // extreme_heat.rs). The calendar resumes once extreme-heat is disabled.
+        if self.bypass_schedule.enabled && !extreme_heat_enabled {
             let day = tm.tm_mday as u8;
             let month = (tm.tm_mon + 1) as u8;
             let is_summer = is_date_in_range(
@@ -179,7 +181,7 @@ impl Scheduler {
             );
             let mut st = self.state.lock().unwrap();
             if is_summer != st.requested_bypass_open {
-                st.requested_bypass_open = is_summer;
+                st.set_bypass_open(is_summer);
                 info!("Scheduler: Bypass {}", if is_summer { "open (summer)" } else { "closed (winter)" });
             }
         }

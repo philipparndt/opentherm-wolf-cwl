@@ -518,6 +518,7 @@ function SchedulesTab({ status, airflow, lang, onRefresh }: { status: Status | n
         />
       )}
 
+      <div style={ehEnabled ? 'opacity:0.45;pointer-events:none' : ''} aria-disabled={ehEnabled}>
       <h2>{t(lang).summerMode}</h2>
       <div class="card">
         <p style="font-size:0.85em;color:var(--text-muted);margin-bottom:8px">Free cooling — outdoor air bypasses heat exchanger. Enable during warm months.</p>
@@ -536,6 +537,7 @@ function SchedulesTab({ status, airflow, lang, onRefresh }: { status: Status | n
             {MONTHS.slice(1).map((m, i) => <option value={i + 1}>{m}</option>)}
           </select>
         </div>}
+      </div>
       </div>
 
       <button onClick={handleSave}>{t(lang).saveAllSchedules}</button>
@@ -561,8 +563,8 @@ function SettingsTab({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lan
     setConfig({ ...config, [section]: { ...(config as unknown as Record<string, Record<string, unknown>>)[section], [field]: value } } as Config)
   }
 
-  const hum = config.humidity ?? { insideTopics: [], outsideTopic: '', protectionEnabled: false }
-  const setHum = (h: { insideTopics: string[]; outsideTopic: string; protectionEnabled: boolean }) =>
+  const hum = config.humidity ?? { insideTopics: [], outsideTopics: [], protectionEnabled: false }
+  const setHum = (h: { insideTopics: string[]; outsideTopics: string[]; protectionEnabled: boolean }) =>
     setConfig({ ...config, humidity: h })
 
   return (
@@ -607,9 +609,16 @@ function SettingsTab({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lan
         <h3>{t(lang).humiditySensors}</h3>
         <p style="font-size:0.85em;color:var(--text-muted);margin-bottom:8px">{t(lang).humiditySensorsHint}</p>
         <Toggle checked={hum.protectionEnabled} onChange={(v) => setHum({ ...hum, protectionEnabled: v })} label={t(lang).moistureProtection} />
-        <label style="margin-top:10px;display:block">{t(lang).outdoorSensorTopic}</label>
-        <input type="text" value={hum.outsideTopic} placeholder="garden/weather/indoor_dht"
-          onInput={(e) => setHum({ ...hum, outsideTopic: (e.target as HTMLInputElement).value })} />
+        <label style="margin-top:10px;display:block">{t(lang).outdoorSensorTopics}</label>
+        <p style="font-size:0.8em;color:var(--text-muted);margin:2px 0 6px">{t(lang).outdoorSensorTopicsHint}</p>
+        {hum.outsideTopics.map((topic, i) => (
+          <div style="display:flex;gap:6px;margin-bottom:4px">
+            <input type="text" value={topic} placeholder="garden/weather/outdoor" style="flex:1"
+              onInput={(e) => { const arr = [...hum.outsideTopics]; arr[i] = (e.target as HTMLInputElement).value; setHum({ ...hum, outsideTopics: arr }) }} />
+            <button class="danger" style="padding:6px 10px;margin:0" onClick={() => setHum({ ...hum, outsideTopics: hum.outsideTopics.filter((_, j) => j !== i) })}>✕</button>
+          </div>
+        ))}
+        <button style="padding:6px 12px;font-size:0.85em" onClick={() => setHum({ ...hum, outsideTopics: [...hum.outsideTopics, ''] })}>{t(lang).addOutdoorSensor}</button>
         <label style="margin-top:10px;display:block">{t(lang).indoorSensorTopics}</label>
         {hum.insideTopics.map((topic, i) => (
           <div style="display:flex;gap:6px;margin-bottom:4px">

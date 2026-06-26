@@ -437,15 +437,23 @@ fn main() {
                 // Persist the rolled-over history to the broker (retained).
                 st.mqtt_publish_history = true;
             }
-            // Coarse humidity history: max fresh indoor RH + fresh outdoor RH.
-            let indoor_rh = st.humidity_inside.values()
-                .filter(|s| humidity::is_fresh(s.updated_ms, now_ms))
-                .map(|s| s.humidity)
-                .fold(None, |acc: Option<f32>, h| Some(acc.map_or(h, |a| a.max(h))));
-            let outdoor_rh = st.humidity_outside
-                .filter(|s| humidity::is_fresh(s.updated_ms, now_ms))
-                .map(|s| s.humidity);
-            st.temp_history.sample_humidity(now_ms, indoor_rh, outdoor_rh);
+            // Coarse humidity history: max fresh indoor RH + max fresh outdoor RH.
+            let max_fresh_rh = |sensors: &std::collections::HashMap<String, app_state::HumiditySample>| {
+                sensors.values()
+                    .filter(|s| humidity::is_fresh(s.updated_ms, now_ms))
+                    .filter_map(|s| s.humidity)
+                    .fold(None, |acc: Option<f32>, h| Some(acc.map_or(h, |a| a.max(h))))
+            };
+            let indoor_rh = max_fresh_rh(&st.humidity_inside);
+            let outdoor_rh = max_fresh_rh(&st.humidity_outside);
+            // Specific enthalpy (kJ/kg) from the same aggregated decision inputs
+            // shown on the status page; `None` on a side with no fresh sensor.
+            let (indoor_h, outdoor_h) =
+                match humidity::inputs(st, now_ms, st.cwl_data.exhaust_temp, st.cwl_data.supply_temp) {
+                    Some(inp) => (Some(inp.indoor.h), Some(inp.outdoor.h)),
+                    None => (None, None),
+                };
+            st.temp_history.sample_humidity(now_ms, indoor_rh, outdoor_rh, indoor_h, outdoor_h);
         }
 
         // Apply any RAM-only state recovered from retained MQTT snapshots. The
@@ -467,6 +475,15 @@ fn main() {
                     if st.temp_history.restore_from_snapshot(&bytes, now_epoch) {
                         display_dirty.store(true, Ordering::Relaxed);
                         info!("MQTT recovery: temperature history restored");
+                    }
+                    // Restore bypass transitions for the timeline shading,
+                    // independent of whether the temperature points restored.
+                    let bypass = crate::history::parse_bypass_events(&bytes);
+                    if !bypass.is_empty() {
+                        st.bypass_events.clear();
+                        for (epoch, open) in bypass {
+                            st.bypass_events.push_back(crate::app_state::BypassEvent { epoch, open });
+                        }
                     }
                 }
                 if let Some(bytes) = st.pending_extreme_heat_json.take() {

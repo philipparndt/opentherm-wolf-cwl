@@ -481,7 +481,7 @@ impl Display {
         } else if apply && self.current_page == Page::Bypass {
             let open = self.edit_vent_level != 0;
             let mut st = self.state.lock().unwrap();
-            st.requested_bypass_open = open;
+            st.set_bypass_open(open);
             st.config.bypass_open = open;
             st.persist_config = true;
         } else if apply && self.current_page == Page::Settings {

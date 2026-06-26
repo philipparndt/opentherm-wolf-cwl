@@ -60,12 +60,12 @@ impl MqttManager {
         let url = format!("mqtt://{}:{}", mqtt_server, mqtt_port);
         let base_topic = mqtt_topic;
 
-        // Buffers sized to hold the retained history snapshot (~12 KB of
-        // downsampled timestamped points) in a single frame, so neither the
-        // publish nor the recovery read fragments.
+        // Buffers sized to hold the retained history snapshot (~16 KB of
+        // downsampled timestamped points: temperature + humidity + enthalpy) in
+        // a single frame, so neither the publish nor the recovery read fragments.
         let conf = MqttClientConfiguration {
-            buffer_size: 16384,
-            out_buffer_size: 16384,
+            buffer_size: 20480,
+            out_buffer_size: 20480,
             ..Default::default()
         };
 
@@ -108,9 +108,7 @@ impl MqttManager {
         let topics: Vec<String> = {
             let st = self.state.lock().unwrap();
             let mut v = st.config.humidity_inside_topics.clone();
-            if !st.config.humidity_outside_topic.is_empty() {
-                v.push(st.config.humidity_outside_topic.clone());
-            }
+            v.extend(st.config.humidity_outside_topics.iter().cloned());
             v
         };
         for t in topics {
@@ -218,7 +216,14 @@ impl MqttManager {
         }
         let json = {
             let st = self.state.lock().unwrap();
-            st.temp_history.snapshot_json(now_epoch)
+            // Compact bypass transitions `[[epoch,open01],…]`, restored on reboot.
+            let mut bypass = String::from("[");
+            for (i, e) in st.bypass_events.iter().enumerate() {
+                if i > 0 { bypass.push(','); }
+                bypass.push_str(&format!("[{},{}]", e.epoch, if e.open { 1 } else { 0 }));
+            }
+            bypass.push(']');
+            st.temp_history.snapshot_json(now_epoch, &bypass)
         };
         if json.contains("\"points\":[]") {
             return;
@@ -365,8 +370,7 @@ fn handle_event(event: EspMqttEvent<'_>, state: &AppState, base_topic: &str) {
 fn try_ingest_sensor(topic: &str, data: &[u8], state: &AppState) -> bool {
     let mut st = state.lock().unwrap();
     let is_inside = st.config.humidity_inside_topics.iter().any(|t| t == topic);
-    let is_outside = !st.config.humidity_outside_topic.is_empty()
-        && st.config.humidity_outside_topic == topic;
+    let is_outside = st.config.humidity_outside_topics.iter().any(|t| t == topic);
     if !is_inside && !is_outside {
         return false;
     }
@@ -375,12 +379,12 @@ fn try_ingest_sensor(topic: &str, data: &[u8], state: &AppState) -> bool {
         Ok(v) => v,
         Err(_) => return true, // matched a sensor topic; ignore malformed payload
     };
-    let humidity = match val["humidity"].as_f64() {
-        Some(h) => h as f32,
-        None => return true, // humidity is required
-    };
+    let humidity = val["humidity"].as_f64().map(|v| v as f32);
     let temperature = val["temperature"].as_f64().map(|v| v as f32);
     let pressure = val["pressure"].as_f64().map(|v| v as f32);
+    if humidity.is_none() && temperature.is_none() {
+        return true; // matched a sensor topic but carries no usable reading
+    }
     let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
     let sample = HumiditySample { humidity, temperature, pressure, updated_ms: now_ms };
     if let Some(p) = pressure {
@@ -390,7 +394,7 @@ fn try_ingest_sensor(topic: &str, data: &[u8], state: &AppState) -> bool {
         st.humidity_inside.insert(topic.to_string(), sample);
     }
     if is_outside {
-        st.humidity_outside = Some(sample);
+        st.humidity_outside.insert(topic.to_string(), sample);
     }
     true
 }
@@ -411,7 +415,7 @@ fn handle_command(topic: &str, message: &str, state: &AppState, _base_topic: &st
         }
     } else if topic.ends_with("/set/bypass") {
         let open = matches!(message.trim(), "1" | "true" | "on");
-        st.requested_bypass_open = open;
+        st.set_bypass_open(open);
         st.config.bypass_open = open;
         st.persist_config = true;
         st.display_wake_requested = true;

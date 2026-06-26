@@ -52,6 +52,27 @@ impl Reason {
     }
 }
 
+/// Why the mode is *holding* the current level instead of switching to the one
+/// it just decided — surfaced so the UI can tell a deliberate hold apart from a
+/// stuck controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HoldReason {
+    #[default]
+    None,     // current level == decided level, nothing withheld
+    Deadband, // held in the neutral energy band (hysteresis), bare rule would switch
+    Dwell,    // a different level was decided but the 15-min dwell hasn't elapsed
+}
+
+impl HoldReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HoldReason::None => "none",
+            HoldReason::Deadband => "deadband",
+            HoldReason::Dwell => "dwell",
+        }
+    }
+}
+
 /// A ventilation level change made by the mode, kept so the web UI can draw a
 /// reason-annotated marker at the time it happened.
 #[derive(Debug, Clone, Copy)]
@@ -61,11 +82,26 @@ pub struct EhEvent {
     pub reason: Reason,
 }
 
-/// Latest reading from one MQTT humidity sensor. `temperature`/`pressure` may be
-/// absent depending on the sensor; `humidity` is always present.
+/// Maximum retained bypass transitions. Bypass toggles only a handful of times
+/// per day, so this covers far more than the ~24 h history window; oldest dropped
+/// when full.
+pub const BYPASS_EVENT_CAPACITY: usize = 64;
+
+/// A bypass-damper state transition, kept so the timeline can shade its
+/// background by when the bypass was open. `open` is the state the damper moved
+/// *to* at `epoch`.
+#[derive(Debug, Clone, Copy)]
+pub struct BypassEvent {
+    pub epoch: i64,
+    pub open: bool,
+}
+
+/// Latest reading from one MQTT climate sensor. Each field is optional so a
+/// sensor may report only humidity (a hygrometer), only temperature (an outdoor
+/// thermometer), or both. At least one of `humidity`/`temperature` is present.
 #[derive(Debug, Clone, Copy)]
 pub struct HumiditySample {
-    pub humidity: f32,
+    pub humidity: Option<f32>,
     pub temperature: Option<f32>,
     pub pressure: Option<f32>,
     pub updated_ms: u32,
@@ -81,6 +117,10 @@ pub struct AppStateInner {
     // Requested state (set by web/MQTT, consumed by OT polling)
     pub requested_vent_level: u8,
     pub requested_bypass_open: bool,
+    // Log of bypass open/closed transitions across the history window, feeding
+    // the timeline's background shading. Appended only on an actual change via
+    // [`AppStateInner::set_bypass_open`]; oldest dropped when full.
+    pub bypass_events: VecDeque<BypassEvent>,
     pub requested_filter_reset: bool,
     // True once the OT master has either (a) read the CWL's current ventilation
     // level via ID 77 and mirrored it into requested_vent_level, or (b) the
@@ -110,13 +150,19 @@ pub struct AppStateInner {
     pub eh_last_change_epoch: i64,
     pub eh_events: VecDeque<EhEvent>,
     pub eh_current_reason: Reason,
+    // Why the mode is currently withholding a switch (if at all), and — for a
+    // dwell hold — the level it would switch to once the dwell elapses. Updated
+    // each evaluation; `eh_pending_level` is only meaningful when `eh_hold ==
+    // Dwell`. Surfaced on /api/status for the decision explainer.
+    pub eh_hold: HoldReason,
+    pub eh_pending_level: u8,
 
     // Humidity-aware ventilation runtime state. Sensor readings come from MQTT
     // (keyed by topic for indoor; one slot for outdoor). `ambient_pressure_kpa`
     // is updated from any sensor reporting pressure. `protection_active` tracks
     // the standalone moisture-protection override (with hysteresis).
     pub humidity_inside: HashMap<String, HumiditySample>,
-    pub humidity_outside: Option<HumiditySample>,
+    pub humidity_outside: HashMap<String, HumiditySample>,
     pub ambient_pressure_kpa: f32,
     pub protection_active: bool,
 
@@ -162,6 +208,7 @@ impl AppStateInner {
             temp_history: TempHistory::new(),
             requested_vent_level,
             requested_bypass_open,
+            bypass_events: VecDeque::new(),
             requested_filter_reset: false,
             initial_level_known: false,
             schedule_active: false,
@@ -173,8 +220,10 @@ impl AppStateInner {
             eh_last_change_epoch: 0,
             eh_events: VecDeque::with_capacity(EH_EVENT_CAPACITY),
             eh_current_reason: Reason::TempDelta,
+            eh_hold: HoldReason::None,
+            eh_pending_level: 0,
             humidity_inside: HashMap::new(),
-            humidity_outside: None,
+            humidity_outside: HashMap::new(),
             ambient_pressure_kpa: crate::psychro::STANDARD_PRESSURE_KPA,
             protection_active: false,
             pending_history_json: None,
@@ -217,6 +266,29 @@ impl AppStateInner {
         }
         self.eh_events.push_back(EhEvent { epoch, level, reason });
         self.mqtt_publish_extreme_heat = true;
+    }
+
+    /// Set the requested bypass state, recording a transition (epoch + new
+    /// state) only when it actually changes. This is the single chokepoint every
+    /// bypass writer (extreme-heat, scheduler, manual web/MQTT/encoder) funnels
+    /// through, so the timeline's shading history can never miss a change. The
+    /// persisted `config.bypass_open` baseline is the caller's concern: manual
+    /// paths set it, automatic ones leave it alone (no flash wear).
+    pub fn set_bypass_open(&mut self, open: bool) {
+        if self.requested_bypass_open == open {
+            return;
+        }
+        self.requested_bypass_open = open;
+        let epoch = unsafe { esp_idf_svc::sys::time(core::ptr::null_mut()) } as i64;
+        if epoch < 1_700_000_000 {
+            return; // no usable timestamp yet — state updated, transition not logged
+        }
+        if self.bypass_events.len() >= BYPASS_EVENT_CAPACITY {
+            self.bypass_events.pop_front();
+        }
+        self.bypass_events.push_back(BypassEvent { epoch, open });
+        // Shading rides on the retained temperature-history snapshot.
+        self.mqtt_publish_history = true;
     }
 
     /// Like [`push_history_marker`] but stamps the current wall-clock time.

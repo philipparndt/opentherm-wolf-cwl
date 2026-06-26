@@ -1,7 +1,7 @@
 export interface SensorReading {
   topic: string
   role: 'indoor' | 'outdoor'
-  humidity: number
+  humidity: number | null
   temperature: number | null
   pressure: number | null
   fresh: boolean
@@ -10,6 +10,8 @@ export interface SensorReading {
 export interface HumidityStatus {
   active: boolean
   ambientPressureKpa: number
+  indoorTemp: number | null
+  outdoorTemp: number | null
   indoorRh: number | null
   outdoorRh: number | null
   indoorAh: number | null
@@ -25,7 +27,7 @@ export interface Status {
   status: { filter: boolean; bypass: boolean; connected: boolean }
   system: { uptime: number; freeHeap: number; version: string; mqttConnected: boolean; wifiRssi: number; simulated: boolean }
   timedOff: { active: boolean; remainingMinutes: number }
-  extremeHeat: { enabled: boolean; currentLevel: number; lastChangeEpoch: number; reason: string; protectionEnabled: boolean; protectionActive: boolean }
+  extremeHeat: { enabled: boolean; currentLevel: number; lastChangeEpoch: number; reason: string; protectionEnabled: boolean; protectionActive: boolean; holdReason: 'none' | 'deadband' | 'dwell'; pendingLevel: number; dwellRemainingSecs: number }
   humidity: HumidityStatus
   airflow: { reduced: number; normal: number; party: number }
 }
@@ -36,13 +38,14 @@ export interface Config {
   web: { username: string; password: string }
   pins: { otIn: number; otOut: number; sda: number; scl: number; encClk: number; encDt: number; encSw: number }
   extremeHeat?: { enabled: boolean }
-  humidity?: { insideTopics: string[]; outsideTopic: string; protectionEnabled: boolean }
+  humidity?: { insideTopics: string[]; outsideTopics: string[]; protectionEnabled: boolean }
   configured: boolean
   language?: string
 }
 
 export type HistoryBucket = [number, number] // compact [min, max]
 export interface HeatEvent { epoch: number; level: number; reason: string }
+export interface BypassEvent { epoch: number; open: boolean }
 export interface History {
   slots: number
   bucketMs: number
@@ -53,7 +56,10 @@ export interface History {
   humidityBucketMs?: number
   indoorHumidity?: (HistoryBucket | null)[]
   outdoorHumidity?: (HistoryBucket | null)[]
+  indoorEnthalpy?: (HistoryBucket | null)[]
+  outdoorEnthalpy?: (HistoryBucket | null)[]
   events: HeatEvent[]
+  bypass?: BypassEvent[]
 }
 
 async function request(url: string, options?: RequestInit) {

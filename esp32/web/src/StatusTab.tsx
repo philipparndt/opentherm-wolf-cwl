@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'preact/hooks'
 import { resumeSchedule } from './api'
 import type { Status } from './api'
-import { ExtremeHeatChart } from './ExtremeHeatChart'
+import { TimelineChart } from './TimelineChart'
 import { t, type Lang } from './translations'
 
 export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirmed }: {
@@ -45,6 +45,9 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
   const reasonLabels = tr.reasonLabels as Record<string, string>
   const reasonText = tr.reasonText as Record<string, string>
   const n1 = (v: number | null, suffix = '') => (v == null ? '–' : `${v.toFixed(1)}${suffix}`)
+  const dh = hum.indoorEnthalpy != null && hum.outdoorEnthalpy != null ? hum.outdoorEnthalpy - hum.indoorEnthalpy : null
+  const dhStr = dh == null ? '–' : `${dh >= 0 ? '+' : ''}${dh.toFixed(1)}`
+  const fmtMMSS = (s: number) => { const m = Math.floor(Math.max(0, s) / 60); const ss = Math.max(0, s) % 60; return `${m}:${String(ss).padStart(2, '0')}` }
 
   return (
     <>
@@ -88,7 +91,7 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
         <div class="stat"><span class="label">{t(lang).supply}</span><span class="value">{status.temperature.supply.toFixed(1)} °C</span></div>
         <div class="stat"><span class="label">{t(lang).exhaust}</span><span class="value">{status.temperature.exhaust.toFixed(1)} °C</span></div>
       </div>
-      <ExtremeHeatChart lang={lang} />
+      <TimelineChart lang={lang} />
 
       {showDecision && (
         <div class="card">
@@ -96,10 +99,18 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
           <div class="stat"><span class="label">{tr.activeRule}</span><span class="value">{reasonLabels[eh.reason] ?? eh.reason}</span></div>
           <div class="stat"><span class="label">{tr.level}</span><span class="value">{tr.levels[eh.currentLevel] ?? eh.currentLevel}</span></div>
           <p style="font-size:0.85em;color:var(--text-muted);margin:6px 0">{reasonText[eh.reason] ?? ''}</p>
+          {eh.holdReason !== 'none' && (
+            <div class="msg" style="font-size:0.85em;margin:6px 0">
+              {eh.holdReason === 'dwell'
+                ? tr.holdDwell.replace('{level}', tr.levels[eh.pendingLevel] ?? String(eh.pendingLevel)).replace('{time}', fmtMMSS(eh.dwellRemainingSecs))
+                : tr.holdDeadband.replace('{dh}', dhStr)}
+            </div>
+          )}
           {hum.active ? (
             <>
-              <div class="stat"><span class="label">{tr.indoorAir}</span><span class="value">{n1(hum.indoorRh, '%')} · {n1(hum.indoorAh, ' g/m³')} · {n1(hum.indoorEnthalpy, ' kJ/kg')}</span></div>
-              <div class="stat"><span class="label">{tr.outdoorAir}</span><span class="value">{n1(hum.outdoorRh, '%')} · {n1(hum.outdoorAh, ' g/m³')} · {n1(hum.outdoorEnthalpy, ' kJ/kg')}</span></div>
+              <div class="stat"><span class="label">{tr.indoorAir}</span><span class="value">{n1(hum.indoorTemp, '°')} · {n1(hum.indoorRh, '%')} · {n1(hum.indoorAh, ' g/m³')} · {n1(hum.indoorEnthalpy, ' kJ/kg')}</span></div>
+              <div class="stat"><span class="label">{tr.outdoorAir}</span><span class="value">{n1(hum.outdoorTemp, '°')} · {n1(hum.outdoorRh, '%')} · {n1(hum.outdoorAh, ' g/m³')} · {n1(hum.outdoorEnthalpy, ' kJ/kg')}</span></div>
+              <p style="font-size:0.8em;color:var(--text-muted);margin:2px 0 0">{tr.aggregateHint}</p>
               <div class="stat"><span class="label">{tr.ambientPressure}</span><span class="value">{(hum.ambientPressureKpa * 10).toFixed(0)} hPa</span></div>
               {eh.protectionActive && <div class="msg warning" style="margin-top:8px">{tr.protectionActiveMsg}</div>}
             </>
@@ -116,7 +127,7 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
             <div class="stat">
               <span class="label">{sn.role === 'outdoor' ? '🌤' : '🏠'} {sn.topic}</span>
               <span class={`value ${sn.fresh ? '' : 'fault'}`}>
-                {sn.humidity.toFixed(0)}%{sn.temperature != null ? ` · ${sn.temperature.toFixed(1)}°` : ''}{sn.pressure != null ? ` · ${sn.pressure.toFixed(0)} hPa` : ''}{sn.fresh ? '' : ' · stale'}
+                {sn.humidity != null ? `${sn.humidity.toFixed(0)}%` : ''}{sn.temperature != null ? `${sn.humidity != null ? ' · ' : ''}${sn.temperature.toFixed(1)}°` : ''}{sn.pressure != null ? ` · ${sn.pressure.toFixed(0)} hPa` : ''}{sn.fresh ? '' : ' · stale'}
               </span>
             </div>
           ))}
