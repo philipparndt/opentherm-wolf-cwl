@@ -16,6 +16,7 @@ mod ot_master;
 mod panic_capture;
 mod psychro;
 mod scheduler;
+mod sensor_filter;
 mod status_led;
 mod watchdog;
 mod webserver;

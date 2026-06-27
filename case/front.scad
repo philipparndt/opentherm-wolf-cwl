@@ -30,6 +30,7 @@ border=2;
 case_width = 110;
 case_length = 72;
 case_radius = 10;
+h=20;
 
 module case_front() {
     // Main case front
@@ -40,12 +41,13 @@ module case_front() {
 
     difference() {
         union() {
+            translate([0,0,-10])
             difference() {
-                linear_extrude(height=10+offset)
+                linear_extrude(height=h+offset)
                     rounded_rectangle(width=case_width, length=case_length, r=case_radius, fn=64);
 
                 translate([border, border, -border])
-                    linear_extrude(height=10)
+                    linear_extrude(height=h)
                         rounded_rectangle(width=case_width-border*2, length=case_length-border*2, r=case_radius-border, fn=64);
 
             }
@@ -82,8 +84,6 @@ module case_front() {
 
 }
 
-
-
 difference() {
     case_front();
 
@@ -98,15 +98,42 @@ difference() {
             rounded_rectangle(width=case_width-border*2, length=19, r=case_radius-border, fn=64);
 
     // Ethernet cutout
-    translate([0,41+3+6,-8])
-        cube([10,25-2.7-6,20-5.5]);
+    translate([0,41+3+6,-8-3])
+        cube([10,25-2.7-6,20-5.5+3]);
 
-    // "Lüftung"
-    translate([5,41+8,0])
-        cube([100,10,20]);
+    // Kabel
+    translate([-5,41+5,0])
+        rotate([0,90,0])
+            cylinder(d=4.8, h=10, $fn=128);
+
+    // "Lüftung" - diagonal 45° slots covering the 100x20 area
+    translate([5, 44, 0])
+        let(
+            vw    = 100,            // vent area width  (x)
+            vh    = 20,             // vent area height (y)
+            sw    = 3.5,            // slot width
+            pitch = 7,              // perpendicular spacing between slots
+            step  = pitch * sqrt(2),
+            cb    = (vh - vw) / 2   // centre b (= y - x) of the full-length band
+        )
+        for (i = [-9 : 9])
+            let(
+                b   = cb + i * step,
+                xlo = max(0, -b),
+                xhi = min(vw, vh - b),
+                dx  = xhi - xlo,
+                cx  = (xlo + xhi) / 2,
+                cy  = cx + b,
+                len = dx * sqrt(2) - sw   // inset rounded caps so they stay inside
+            )
+            if (len > 2)
+                translate([cx, cy, 0])
+                    rotate([0, 0, 45])
+                        linear_extrude(height = vh)
+                            translate([-len/2, -sw/2])
+                                long_hole(len, sw);
 }
 
 translate([case_width-8.3, case_length-6.6, 0])
     stand();
-
 

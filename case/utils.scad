@@ -8,3 +8,9 @@ module rounded_rectangle(width, length, r, fn=64) {
             square([width - 2*rr, length - 2*rr]);
 
 }
+
+module long_hole(width, height, fn=64) {
+    // automatically set radius to half of the smaller dimension
+    r = min(width, height) / 2;
+    rounded_rectangle(width, height, r - .001, fn);
+}

@@ -238,7 +238,14 @@ mod tests {
     }
 
     fn sample(humidity: Option<f32>, temperature: Option<f32>) -> HumiditySample {
-        HumiditySample { humidity, temperature, pressure: None, updated_ms: 1 }
+        HumiditySample {
+            humidity,
+            temperature,
+            pressure: None,
+            updated_ms: 1,
+            hum_filter: crate::sensor_filter::FieldFilter::default(),
+            temp_filter: crate::sensor_filter::FieldFilter::default(),
+        }
     }
 
     fn side(samples: &[(&str, Option<f32>, Option<f32>)]) -> HashMap<String, HumiditySample> {

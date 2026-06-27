@@ -99,12 +99,19 @@ pub struct BypassEvent {
 /// Latest reading from one MQTT climate sensor. Each field is optional so a
 /// sensor may report only humidity (a hygrometer), only temperature (an outdoor
 /// thermometer), or both. At least one of `humidity`/`temperature` is present.
+///
+/// `humidity`/`temperature` are the *filtered* (trusted) values — see
+/// [`crate::sensor_filter`]. The per-field filter state is carried in
+/// `hum_filter`/`temp_filter` so the spike guard can compare each new reading
+/// against this sensor's recent history.
 #[derive(Debug, Clone, Copy)]
 pub struct HumiditySample {
     pub humidity: Option<f32>,
     pub temperature: Option<f32>,
     pub pressure: Option<f32>,
     pub updated_ms: u32,
+    pub hum_filter: crate::sensor_filter::FieldFilter,
+    pub temp_filter: crate::sensor_filter::FieldFilter,
 }
 
 /// Mutable application state shared between main loop and HTTP handlers.

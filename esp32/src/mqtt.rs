@@ -397,16 +397,55 @@ fn try_ingest_sensor(topic: &str, data: &[u8], state: &AppState) -> bool {
         Ok(v) => v,
         Err(_) => return true, // matched a sensor topic; ignore malformed payload
     };
-    let humidity = val["humidity"].as_f64().map(|v| v as f32);
-    let temperature = val["temperature"].as_f64().map(|v| v as f32);
+    let raw_humidity = val["humidity"].as_f64().map(|v| v as f32);
+    let raw_temperature = val["temperature"].as_f64().map(|v| v as f32);
     let pressure = val["pressure"].as_f64().map(|v| v as f32);
-    if humidity.is_none() && temperature.is_none() {
+    if raw_humidity.is_none() && raw_temperature.is_none() {
         return true; // matched a sensor topic but carries no usable reading
     }
     let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
-    let sample = HumiditySample { humidity, temperature, pressure, updated_ms: now_ms };
+
+    use crate::sensor_filter::{self, FieldFilter, in_range};
+    use crate::sensor_filter::{HUMIDITY_MAX_STEP, HUMIDITY_MIN, HUMIDITY_MAX};
+    use crate::sensor_filter::{TEMPERATURE_MAX_STEP, TEMPERATURE_MIN, TEMPERATURE_MAX};
+
+    // Carry this sensor's previous filter state so the spike guard can compare
+    // the new reading against its recent history.
+    let prev = st.humidity_inside.get(topic)
+        .or_else(|| st.humidity_outside.get(topic))
+        .copied();
+    let mut hum_filter = prev.map_or_else(FieldFilter::default, |s| s.hum_filter);
+    let mut temp_filter = prev.map_or_else(FieldFilter::default, |s| s.temp_filter);
+
+    // Filter each present field; a missing field carries the last trusted value.
+    let humidity = match raw_humidity {
+        Some(h) => hum_filter.update(h, HUMIDITY_MAX_STEP, HUMIDITY_MIN, HUMIDITY_MAX),
+        None => prev.and_then(|s| s.humidity),
+    };
+    let temperature = match raw_temperature {
+        Some(t) => temp_filter.update(t, TEMPERATURE_MAX_STEP, TEMPERATURE_MIN, TEMPERATURE_MAX),
+        None => prev.and_then(|s| s.temperature),
+    };
+
+    // Freshness only advances when the sensor actually sent a physically-plausible
+    // value, so a sensor emitting only garbage ages out of the decision instead
+    // of freezing a held value as "fresh" forever.
+    let usable = raw_humidity.map_or(false, |h| in_range(h, HUMIDITY_MIN, HUMIDITY_MAX))
+        || raw_temperature.map_or(false, |t| in_range(t, TEMPERATURE_MIN, TEMPERATURE_MAX));
+    let updated_ms = match prev {
+        Some(p) if !usable => p.updated_ms,
+        _ => now_ms,
+    };
+
+    let sample = HumiditySample { humidity, temperature, pressure, updated_ms, hum_filter, temp_filter };
+
+    // Only adopt a physically-plausible ambient pressure; ignore zero/garbage so
+    // a bad pressure read can't skew the enthalpy calculation.
     if let Some(p) = pressure {
-        st.ambient_pressure_kpa = pressure_to_kpa(p);
+        let kpa = pressure_to_kpa(p);
+        if sensor_filter::in_range(kpa, 80.0, 110.0) {
+            st.ambient_pressure_kpa = kpa;
+        }
     }
     if is_inside {
         st.humidity_inside.insert(topic.to_string(), sample);
