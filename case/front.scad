@@ -22,18 +22,13 @@ module stand(h=15.5, o=10, bore=4.2, ch=0.8) {
 }
 
 module stands() {
-    translate([-91.2/2, 0, 0])
-        for (i = [0:1]) {
-            for (j = [0:0]) {
-                translate([i*91.8, j*42, 0])
-                    stand();
-            }
-        }
-
-    *translate([-91.2/2, 80, -1.6]) {
-        stand(h=15.5+1.6);
-        translate([91.8, 0, 0])
-            stand(h=15.5+1.6);
+    if (slim) {
+        // smaller bosses braced into their two near walls (side + bottom)
+        braced_stand(rstand_xL, rstand_y, -1, -1, o=8);
+        braced_stand(rstand_xR, rstand_y, +1, -1, o=8);
+    } else {
+        translate([rstand_xL, rstand_y, 0]) stand();
+        translate([rstand_xR, rstand_y, 0]) stand();
     }
 }
 
@@ -45,12 +40,71 @@ case_radius = 10;
 h=20;
 standoff_chamfers = true;   // lead-in chamfers on the standoff screw holes
 
+slim = true;        // pull bottom + left + right walls in to the round standoffs
+slim_inset = .9;      // clearance between each round standoff edge and the inner wall
+
+// round standoff centres (PCB-fixed), exactly as placed by stands()
+rstand_o  = 10;
+rstand_xL = case_width/2 - 45.6;   // 9.4
+rstand_xR = case_width/2 + 46.2;   // 101.2
+rstand_y  = 9;
+
+// case outer boundary: slim brings bottom/left/right to the standoffs, top fixed
+x0 = slim ? rstand_xL - rstand_o/2 - slim_inset - border : 0;
+x1 = slim ? rstand_xR + rstand_o/2 + slim_inset + border : case_width;
+y0 = slim ? rstand_y  - rstand_o/2 - slim_inset - border : 0;
+y1 = case_length;
+cw = x1 - x0;        // case outer width
+cl = y1 - y0;        // case outer length
+
 // Solid (un-hollowed) outer body of the case, used to trim braces so they
 // conform to the rounded corner instead of poking through the wall.
 module case_outer_solid() {
-    translate([0,0,-10])
+    translate([x0,y0,-10])
         linear_extrude(height=h+offset)
-            rounded_rectangle(width=case_width, length=case_length, r=case_radius, fn=64);
+            rounded_rectangle(width=cw, length=cl, r=case_radius, fn=64);
+}
+
+// Standoff braced into a corner: a (smaller) boss with long-hole ribs toward
+// the two near walls. sx,sy = brace direction signs (-1/+1 in x and y). The
+// ribs overshoot then trim to the case outer surface, and the screw hole +
+// chamfers are re-cut where the ribs filled over them.
+module braced_stand(px, py, sx, sy, o=8, hh=15.5, bore=4.2) {
+    bw    = o;          // brace width matches the boss
+    reach = 22;         // overshoot length; trimmed back to the wall
+    ch    = 0.8;
+    eps   = 0.1;
+    ztop  = hh - 5.5;   // boss top (stand() sinks the body by 5.5)
+    ax    = sx > 0 ? 0 : 180;
+    ay    = sy > 0 ? 90 : -90;
+
+    translate([px, py, 0]) {
+        difference() {
+            union() {
+                stand(h=hh, o=o, bore=bore);
+
+                intersection() {
+                    translate([0, 0, -5.5])
+                        linear_extrude(height=hh) {
+                            rotate([0,0,ax]) translate([-bw/2,-bw/2]) long_hole(reach, bw);
+                            rotate([0,0,ay]) translate([-bw/2,-bw/2]) long_hole(reach, bw);
+                        }
+                    translate([-px, -py, 0])
+                        case_outer_solid();
+                }
+            }
+
+            // re-cut the screw hole (and lead-in chamfers) the braces filled over
+            translate([0, 0, -5.5-eps])
+                cylinder(d=bore, h=hh+2*eps, $fn=64);
+            if (standoff_chamfers) {
+                translate([0, 0, ztop-ch])
+                    cylinder(d1=bore, d2=bore+2*ch, h=ch+eps, $fn=64);
+                translate([0, 0, -5.5-eps])
+                    cylinder(d1=bore+2*ch, d2=bore, h=ch+eps, $fn=64);
+            }
+        }
+    }
 }
 
 // Wall-mount ear: 2mm thick tab sticking out from the case side,
@@ -91,14 +145,14 @@ module case_front() {
 
     difference() {
         union() {
-            translate([0,0,-10])
+            translate([x0,y0,-10])
             difference() {
                 linear_extrude(height=h+offset)
-                    rounded_rectangle(width=case_width, length=case_length, r=case_radius, fn=64);
+                    rounded_rectangle(width=cw, length=cl, r=case_radius, fn=64);
 
                 translate([border, border, -border])
                     linear_extrude(height=h)
-                        rounded_rectangle(width=case_width-border*2, length=case_length-border*2, r=case_radius-border, fn=64);
+                        rounded_rectangle(width=cw-border*2, length=cl-border*2, r=case_radius-border, fn=64);
 
             }
 
@@ -106,11 +160,11 @@ module case_front() {
                 cylinder(d=27, h=9, $fn=64);
 
             // Mounting ears (left: round hole, right: adjustment slot)
-            translate([0, case_length/2 - 6, -10])
+            translate([x0, (y0+y1)/2 - 6, -10])
                 mirror([1,0,0])
                     mounting_latch(long=false);
 
-            translate([case_width, case_length/2 - 6, -10])
+            translate([x1, (y0+y1)/2 - 6, -10])
                 mounting_latch(long=true);
         }
 
@@ -137,8 +191,7 @@ module case_front() {
         rotate([0,180,0])
             display();
 
-    translate([case_width/2,9,0])
-        stands();
+    stands();
 
 }
 
@@ -148,19 +201,19 @@ difference() {
     translate([0,0,10])
         cube([150,39,20]);
 
-    translate([border,40,-8])
-        cube([case_width-border*2,20,20]);
+    translate([x0+border,40,-8])
+        cube([cw-border*2,20,20]);
 
-    translate([border, 51, -border])
+    translate([x0+border, 51, -border])
         linear_extrude(height=10+offset+1)
-            rounded_rectangle(width=case_width-border*2, length=19, r=case_radius-border, fn=64);
+            rounded_rectangle(width=cw-border*2, length=19, r=case_radius-border, fn=64);
 
-    // Ethernet cutout
-    translate([0,50,-11])
+    // Ethernet cutout (in the left wall)
+    translate([x0,50,-11])
         cube([10,17.5,17.5]);
 
-    // Kabel
-    translate([-5,41+5,0])
+    // Kabel (through the left wall)
+    translate([x0-5,41+5,0])
         rotate([0,90,0])
             cylinder(d=4.8, h=10, $fn=128);
 
@@ -192,34 +245,6 @@ difference() {
                                 long_hole(len, sw);
 }
 
-translate([case_width-8.3, case_length-6.6, 0]) {
-    difference() {
-        union() {
-            stand(h=15.5+2, o=8);
-
-            // brace into the corner with long holes toward both walls (+x, +y).
-            // overshoot, then trim to the case outer surface so the ribs follow
-            // the rounded corner and never poke through the wall.
-            intersection() {
-                translate([0, 0, -5.5])
-                    linear_extrude(height=15.5+2) {
-                        rotate([0, 0, 90]) translate([-4, -4]) long_hole(14, 8);
-                        translate([-4, -4]) long_hole(16, 8);
-                    }
-                translate([-(case_width-8.3), -(case_length-6.6), 0])
-                    case_outer_solid();
-            }
-        }
-
-        // re-cut the screw hole (and both lead-in chamfers) the braces filled
-        translate([0, 0, -5.5-0.1])
-            cylinder(d=4.2, h=15.5+2+0.2, $fn=64);
-        if (standoff_chamfers) {
-            translate([0, 0, 12-0.8])
-                cylinder(d1=4.2, d2=4.2+1.6, h=0.8+0.1, $fn=64);
-            translate([0, 0, -5.5-0.1])
-                cylinder(d1=4.2+1.6, d2=4.2, h=0.8+0.1, $fn=64);
-        }
-    }
-}
+// top-right corner standoff, braced toward the right (+x) and top (+y) walls
+braced_stand(x1-8.3, y1-6.6, +1, +1, o=8, hh=15.5+2);
 
