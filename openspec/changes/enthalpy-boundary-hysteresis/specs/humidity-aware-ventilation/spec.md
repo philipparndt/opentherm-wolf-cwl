@@ -45,3 +45,17 @@ SHALL remain the hold-down (muggy-suppression) reason rather than cooling-assist
 - **WHEN** the enthalpy delta is only marginally negative and inside the neutral band, and the mode
   was reducing ventilation
 - **THEN** the displayed reason stays muggy-suppression and is not reported as cooling-assist
+
+### Requirement: Do not derive an air state from an untrustworthy temperature
+
+The system SHALL NOT produce an aggregated air state (and therefore SHALL NOT derive enthalpy or
+absolute humidity) when no fresh sensor on that side reports a temperature and the only available
+fallback is the air-stream inlet at an implausible value — for example the boot default before the
+ventilation unit is connected. In that case the side has no aggregate and the decision falls back to
+the temperature-only rule, rather than acting on a fabricated low-energy reading.
+
+#### Scenario: Boot-default inlet does not fabricate a low enthalpy
+
+- **WHEN** a side has only a humidity sensor without its own temperature and the inlet fallback
+  temperature is implausible (a boot/garbage value)
+- **THEN** no air state is produced for that side and the energy decision is not taken from it

@@ -41,3 +41,34 @@ single physically consistent air state.
   absolute humidity and enthalpy, so they would not reconcile if treated as one air mass
 - **THEN** the explainer labels or groups the figures by their origin (or notes it) rather than
   presenting temperature / RH / AH / enthalpy as one consistent reading
+
+### Requirement: Ventilation display shows the unit's actual level
+
+The ventilation status display SHALL show the unit's **actual** running level (derived from the
+reported relative ventilation, ID 77), not the level commanded over ID 71, since the two can differ
+when the unit lags or rejects a command. A pending user-initiated change MAY be shown transiently
+until the actual level confirms it.
+
+#### Scenario: Commanded and actual levels differ
+
+- **WHEN** the commanded (echoed) level is Normal but the unit's reported relative ventilation
+  corresponds to Reduced
+- **THEN** the display highlights Reduced (the actual level), not Normal
+
+### Requirement: Always present a decision state, never blank or boot-garbage
+
+The decision explainer SHALL always present a meaningful state. Before the ventilation unit is
+connected it SHALL show a "waiting for the unit" state rather than a derived air state (whose inputs
+are not yet trustworthy) or a misleading "data stale" message, and every decision reason SHALL have
+an accompanying plain-language explanation.
+
+#### Scenario: Not yet connected
+
+- **WHEN** the ventilation unit is not connected
+- **THEN** the explainer shows a waiting-for-unit state and no derived enthalpy/absolute-humidity
+  figures
+
+#### Scenario: Every reason has an explanation
+
+- **WHEN** the active reason is any of the defined reasons (including schedule or reboot)
+- **THEN** the explainer shows a non-empty plain-language explanation for it

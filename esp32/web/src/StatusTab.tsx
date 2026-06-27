@@ -13,13 +13,13 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
 }) {
   const [localPending, setLocalPending] = useState<number | null>(null)
 
-  // Clear pending when CWL confirms the new level
+  // Clear pending once the unit's *actual* level (ID 77) reaches what was set.
   useEffect(() => {
-    if (localPending !== null && status?.ventilation.level === localPending) {
+    if (localPending !== null && status?.ventilation.actualLevel === localPending) {
       setLocalPending(null)
       onConfirmed?.()
     }
-  }, [status?.ventilation.level, localPending])
+  }, [status?.ventilation.actualLevel, localPending])
 
   const handleLevelChange = (level: number) => {
     setLocalPending(level)
@@ -33,10 +33,11 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
     return h > 0 ? `${h}h ${m}m` : `${m}m`
   }
 
-  // Determine which level to show as "selected" (active)
-  // If a change is pending, show the pending level as selected (with spinner)
-  // Otherwise show the confirmed level
-  const displayLevel = localPending ?? status.ventilation.level
+  // Determine which level to show as "selected" (active).
+  // A user-initiated change shows the pending level (with spinner) until the
+  // unit confirms; otherwise always show the unit's *actual* running level
+  // (ID 77), not the level we commanded (ID 71) — they can differ.
+  const displayLevel = localPending ?? status.ventilation.actualLevel
 
   const eh = status.extremeHeat
   const hum = status.humidity
@@ -115,7 +116,7 @@ export function StatusTab({ status, lang, onLevelChange, onCancelOff, onConfirme
               {eh.protectionActive && <div class="msg warning" style="margin-top:8px">{tr.protectionActiveMsg}</div>}
             </>
           ) : (
-            <div class="msg" style="font-size:0.85em">{tr.tempOnlyFallback}</div>
+            <div class="msg" style="font-size:0.85em">{status.status.connected ? tr.tempOnlyFallback : tr.waitingForUnit}</div>
           )}
         </div>
       )}

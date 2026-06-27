@@ -164,9 +164,15 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
         let d = &st.cwl_data;
 
         // Humidity sensors + derived psychrometrics for the decision explainer.
+        // Only derive an aggregated air state once the unit is connected: before
+        // that the inlet fallback temperatures (ID 80/82) are still at their boot
+        // defaults, which would yield a bogus enthalpy in the explainer.
         let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
-        let inp = crate::humidity::inputs(
-            &st, now_ms, st.cwl_data.exhaust_temp, st.cwl_data.supply_temp);
+        let inp = if st.cwl_data.connected {
+            crate::humidity::inputs(&st, now_ms, st.cwl_data.exhaust_temp, st.cwl_data.supply_temp)
+        } else {
+            None
+        };
         let mut sensors: Vec<serde_json::Value> = Vec::new();
         for (topic, sm) in st.humidity_inside.iter() {
             sensors.push(json!({
@@ -203,6 +209,11 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "level": d.ventilation_level,
                 "levelName": ventilation_level_name(d.ventilation_level),
                 "requestedLevel": st.requested_vent_level,
+                // The unit's *actual* running level, derived from the reported
+                // relative ventilation (ID 77) — may lag or differ from the level
+                // we commanded via ID 71 (`level`). This is what the UI shows as
+                // the real current state.
+                "actualLevel": crate::cwl_data::VentLevel::from_relative_pct(d.relative_ventilation) as u8,
                 "relative": d.relative_ventilation,
                 "scheduleActive": st.schedule_active,
                 "override": st.schedule_override,

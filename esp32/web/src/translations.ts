@@ -34,9 +34,9 @@ export interface Translations {
   indoorEnthalpy: string; outdoorEnthalpy: string
   indoorAir: string; outdoorAir: string; aggregateHint: string
   holdDeadband: string; holdDwell: string
-  protectionActiveMsg: string; tempOnlyFallback: string
+  protectionActiveMsg: string; tempOnlyFallback: string; waitingForUnit: string
   reasonLabels: { temp: string; cooling: string; dehumidify: string; muggy: string; manual: string; schedule: string; reboot: string }
-  reasonText: { temp: string; cooling: string; dehumidify: string; muggy: string; manual: string }
+  reasonText: { temp: string; cooling: string; dehumidify: string; muggy: string; manual: string; schedule: string; reboot: string }
 }
 
 const en: Translations = {
@@ -168,6 +168,7 @@ const en: Translations = {
   holdDwell: 'Would switch to {level} in {time} (dwell).',
   protectionActiveMsg: 'Moisture protection is actively ventilating.',
   tempOnlyFallback: 'Using temperature only — humidity data is missing or stale.',
+  waitingForUnit: 'Waiting for the ventilation unit — climate decision starts once it is connected.',
   reasonLabels: { temp: 'Temperature', cooling: 'Cooling assist', dehumidify: 'Moisture protection', muggy: 'Muggy suppression', manual: 'Manual', schedule: 'Schedule', reboot: 'Reboot' },
   reasonText: {
     temp: 'Deciding on the supply vs exhaust temperature difference.',
@@ -175,6 +176,8 @@ const en: Translations = {
     dehumidify: 'Indoor air is too humid and outside air is drier — ventilating to dehumidify.',
     muggy: 'Outdoor air is warmer or more humid (higher energy) — holding ventilation down.',
     manual: 'Ventilation level was set manually.',
+    schedule: 'Following the configured ventilation schedule.',
+    reboot: 'Device just (re)started — settling on a decision.',
   },
 }
 
@@ -298,6 +301,7 @@ const de: Translations = {
   holdDwell: 'Würde in {time} auf {level} wechseln (Dwell).',
   protectionActiveMsg: 'Feuchteschutz lüftet aktiv.',
   tempOnlyFallback: 'Nur Temperatur — Feuchtedaten fehlen oder sind veraltet.',
+  waitingForUnit: 'Warte auf die Lüftungsanlage — die Klima-Entscheidung startet, sobald sie verbunden ist.',
   reasonLabels: { temp: 'Temperatur', cooling: 'Kühlung', dehumidify: 'Feuchteschutz', muggy: 'Schwül-Stopp', manual: 'Manuell', schedule: 'Zeitplan', reboot: 'Neustart' },
   reasonText: {
     temp: 'Entscheidung nach der Temperaturdifferenz Zuluft/Abluft.',
@@ -305,6 +309,8 @@ const de: Translations = {
     dehumidify: 'Innenluft ist zu feucht und Außenluft ist trockener — Lüften zum Entfeuchten.',
     muggy: 'Außenluft ist wärmer oder feuchter (mehr Energie) — Lüftung wird gedrosselt.',
     manual: 'Lüftungsstufe wurde manuell gesetzt.',
+    schedule: 'Folgt dem eingestellten Lüftungs-Zeitplan.',
+    reboot: 'Gerät wurde gerade (neu) gestartet — Entscheidung wird ermittelt.',
   },
 }
 

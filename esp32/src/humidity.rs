@@ -138,7 +138,14 @@ fn aggregate_side(
     if fans_running && plausible_temp(inlet_temp) {
         temp_min = Some(temp_min.map_or(inlet_temp, |m| m.min(inlet_temp)));
     }
-    let temp = temp_min.unwrap_or(inlet_temp);
+    // Need a trustworthy temperature to place the moisture at. If no sensor
+    // reported one and the inlet fallback is implausible (e.g. the boot default
+    // before the unit is connected), don't fabricate an air state from it.
+    let temp = match temp_min {
+        Some(t) => t,
+        None if plausible_temp(inlet_temp) => inlet_temp,
+        None => return None,
+    };
 
     let mut air = air_at_temp(moist_t, moist_rh, temp, p);
     air.rh = rh_max; // report/trigger on the highest measured humidity
@@ -412,6 +419,14 @@ mod tests {
     fn aggregate_none_without_fresh_sensor() {
         let empty: HashMap<String, HumiditySample> = HashMap::new();
         assert!(aggregate_side(&empty, 1, 24.0, true, 96.1).is_none());
+    }
+
+    #[test]
+    fn aggregate_none_when_only_implausible_fallback_temp() {
+        // A humidity-only sensor and an implausible inlet (a boot/garbage temp)
+        // must not fabricate an air state from that temperature.
+        let sensors = side(&[("hum_only", Some(50.0), None)]);
+        assert!(aggregate_side(&sensors, 1, 999.0, false, 96.1).is_none());
     }
 
     #[test]

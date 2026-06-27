@@ -238,10 +238,7 @@ impl OtMaster {
                     //   0% → Off (0), 51% → Reduced (1),
                     //   67% → Normal (2), 100% → Party (3).
                     if !st.initial_level_known {
-                        let level = if pct >= 84 { 3 }
-                            else if pct >= 59 { 2 }
-                            else if pct >= 26 { 1 }
-                            else { 0 };
+                        let level = crate::cwl_data::VentLevel::from_relative_pct(pct) as u8;
                         st.requested_vent_level = level;
                         st.initial_level_known = true;
                         info!("OT: inferred initial vent level={} from {}%", level, pct);

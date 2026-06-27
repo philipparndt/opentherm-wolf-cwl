@@ -289,6 +289,24 @@ impl MqttManager {
 
         if d.tsp_valid[54] { msgs.push(("status/bypass_position".into(), d.bypass_status.to_string())); }
 
+        // Computed psychrometrics — the aggregated climate-decision inputs shown
+        // on /api/status (lowest temperature, highest humidity per side, with
+        // absolute humidity and specific enthalpy). Published as individual
+        // retained `climate/*` topics so Telegraf & co. can scrape the subtree.
+        // The ambient pressure feeding the calc is always published; the
+        // indoor/outdoor blocks are skipped when no side has a fresh sensor
+        // (inputs() is None), leaving any prior retained value untouched.
+        let now_ms = unsafe { (esp_idf_svc::sys::esp_timer_get_time() / 1000) as u32 };
+        msgs.push(("climate/ambient_pressure".into(), format!("{:.2}", st.ambient_pressure_kpa)));
+        if let Some(inp) = crate::humidity::inputs(&st, now_ms, d.exhaust_temp, d.supply_temp) {
+            for (side, air) in [("indoor", &inp.indoor), ("outdoor", &inp.outdoor)] {
+                msgs.push((format!("climate/{}/temperature", side), format!("{:.1}", air.temp)));
+                msgs.push((format!("climate/{}/rh", side), format!("{:.1}", air.rh)));
+                msgs.push((format!("climate/{}/ah", side), format!("{:.2}", air.ah)));
+                msgs.push((format!("climate/{}/enthalpy", side), format!("{:.2}", air.h)));
+            }
+        }
+
         drop(st); // Release lock before publishing
 
         for (sub_topic, payload) in &msgs {

@@ -247,7 +247,7 @@ The DIYLess shield acts as the OpenTherm master, replacing the BM remote control
 - Set ventilation level by writing to Data ID 71 (values 0-3)
 - Control bypass via Status V/H (ID 70) master flags
 - Read TSP registers for diagnostics
-- Publish data via MQTT to Home Assistant
+- Publish data via MQTT to Home Assistant (see [docs/mqtt-topics.md](docs/mqtt-topics.md) for the full topic reference)
 
 ### ESPHome Compatibility
 

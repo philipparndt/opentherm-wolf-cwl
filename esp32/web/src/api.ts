@@ -22,7 +22,7 @@ export interface HumidityStatus {
 }
 
 export interface Status {
-  ventilation: { level: number; levelName: string; relative: number; requestedLevel: number; scheduleActive: boolean; override: boolean }
+  ventilation: { level: number; levelName: string; relative: number; requestedLevel: number; actualLevel: number; scheduleActive: boolean; override: boolean }
   temperature: { supply: number; exhaust: number }
   status: { filter: boolean; bypass: boolean; connected: boolean }
   system: { uptime: number; freeHeap: number; version: string; mqttConnected: boolean; wifiRssi: number; simulated: boolean }

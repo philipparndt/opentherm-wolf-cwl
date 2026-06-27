@@ -50,6 +50,12 @@ the dwell timer hasn't elapsed — the UI gives no reason for the non-switch. Th
 - Clarify the explainer's outdoor/indoor figures so the displayed `T / RH / AH / h` no longer reads
   as one inconsistent air mass (RH is the max-RH sensor; AH/h come from the wettest sensor
   re-expressed at the aggregate temperature — they legitimately come from different sensors).
+- **Boot robustness & honest level (from live-device findings):** don't derive an air state from an
+  untrustworthy fallback temperature, and don't show the derived enthalpy in the explainer until the
+  unit is connected — this removes the boot-transient "indoor h ≈ 37.9" glitch. The ventilation
+  display shows the unit's **actual** running level (ID 77), not the commanded one (ID 71), since the
+  two can differ. The explainer always shows a state (a "waiting for the unit" notice while
+  disconnected) and every reason has a plain-language explanation.
 
 ## Capabilities
 

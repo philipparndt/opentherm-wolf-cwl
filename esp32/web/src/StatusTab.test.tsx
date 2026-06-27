@@ -5,12 +5,12 @@ import type { Status } from './api'
 
 function makeStatus(level: number, requestedLevel?: number): Status {
   return {
-    ventilation: { level, levelName: ['Off', 'Reduced', 'Normal', 'Party'][level], relative: [0, 51, 67, 100][level], requestedLevel: requestedLevel ?? level, scheduleActive: true, override: false },
+    ventilation: { level, levelName: ['Off', 'Reduced', 'Normal', 'Party'][level], relative: [0, 51, 67, 100][level], requestedLevel: requestedLevel ?? level, actualLevel: level, scheduleActive: true, override: false },
     temperature: { supply: 18.5, exhaust: 21.0 },
     status: { filter: false, bypass: false, connected: true },
     system: { uptime: 100, freeHeap: 200000, version: 'test', mqttConnected: true, wifiRssi: -50, simulated: false },
     timedOff: { active: false, remainingMinutes: 0 },
-    extremeHeat: { enabled: false, currentLevel: level, lastChangeEpoch: 0, reason: 'temp', protectionEnabled: false, protectionActive: false },
+    extremeHeat: { enabled: false, currentLevel: level, lastChangeEpoch: 0, reason: 'temp', protectionEnabled: false, protectionActive: false, holdReason: 'none', pendingLevel: 0, dwellRemainingSecs: 0 },
     humidity: { active: false, ambientPressureKpa: 101.3, indoorTemp: null, outdoorTemp: null, indoorRh: null, outdoorRh: null, indoorAh: null, outdoorAh: null, indoorEnthalpy: null, outdoorEnthalpy: null, sensors: [] },
     airflow: { reduced: 100, normal: 130, party: 195 },
   }
@@ -138,5 +138,64 @@ describe('StatusTab level buttons', () => {
 
     // Party should not be selected
     expect(buttons[3].classList.contains('active')).toBe(false)
+  })
+})
+
+describe('StatusTab climate-decision hold notice', () => {
+  it('explains a deadband hold with the energy delta', () => {
+    const st = makeStatus(1)
+    st.extremeHeat = { ...st.extremeHeat, enabled: true, reason: 'muggy', holdReason: 'deadband' }
+    st.humidity = { ...st.humidity, active: true, indoorEnthalpy: 63.2, outdoorEnthalpy: 63.3 }
+    const { container } = render(
+      <StatusTab lang="en" status={st} onLevelChange={() => {}} onCancelOff={() => {}} />
+    )
+    expect(container.textContent).toContain('neutral band')
+    expect(container.textContent).toContain('+0.1') // Δh = 63.3 - 63.2
+  })
+
+  it('explains a dwell hold with the pending level and countdown', () => {
+    const st = makeStatus(1)
+    st.extremeHeat = { ...st.extremeHeat, enabled: true, reason: 'muggy', holdReason: 'dwell', pendingLevel: 2, dwellRemainingSecs: 420 }
+    const { container } = render(
+      <StatusTab lang="en" status={st} onLevelChange={() => {}} onCancelOff={() => {}} />
+    )
+    expect(container.textContent).toContain('Normal') // pendingLevel 2
+    expect(container.textContent).toContain('7:00')   // 420 s
+    expect(container.textContent).toContain('dwell')
+  })
+
+  it('shows no hold notice when nothing is withheld', () => {
+    const st = makeStatus(1)
+    st.extremeHeat = { ...st.extremeHeat, enabled: true, reason: 'muggy', holdReason: 'none' }
+    const { container } = render(
+      <StatusTab lang="en" status={st} onLevelChange={() => {}} onCancelOff={() => {}} />
+    )
+    expect(container.textContent).not.toContain('neutral band')
+    expect(container.textContent).not.toContain('dwell')
+  })
+})
+
+describe('StatusTab actual vs commanded level', () => {
+  it('highlights the unit actual level, not the commanded/echoed one', () => {
+    const st = makeStatus(2)         // commanded/echoed level = 2 (Normal)
+    st.ventilation.actualLevel = 1   // unit is actually running Reduced
+    const { container } = render(
+      <StatusTab lang="en" status={st} onLevelChange={() => {}} onCancelOff={() => {}} />
+    )
+    const buttons = container.querySelectorAll('.level-btn')
+    expect(buttons[1].classList.contains('active')).toBe(true)
+    expect(buttons[2].classList.contains('active')).toBe(false)
+  })
+
+  it('shows a waiting note (not a stale-data note) when the unit is not connected', () => {
+    const st = makeStatus(1)
+    st.extremeHeat = { ...st.extremeHeat, enabled: true }
+    st.status = { ...st.status, connected: false }
+    st.humidity = { ...st.humidity, active: false }
+    const { container } = render(
+      <StatusTab lang="en" status={st} onLevelChange={() => {}} onCancelOff={() => {}} />
+    )
+    expect(container.textContent).toContain('Waiting for the ventilation unit')
+    expect(container.textContent).not.toContain('missing or stale')
   })
 })

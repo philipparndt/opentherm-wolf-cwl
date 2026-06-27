@@ -60,6 +60,17 @@ impl VentLevel {
             Self::Party => "Party",
         }
     }
+
+    /// Map the unit's reported relative ventilation (ID 77, %) back to the
+    /// closest discrete level, mirroring the documented operating points:
+    /// 0% → Off, 51% → Reduced, 67% → Normal, 100% → Party. This is the unit's
+    /// *actual* running level, as opposed to the level we commanded via ID 71.
+    pub fn from_relative_pct(pct: u8) -> Self {
+        if pct >= 84 { Self::Party }
+        else if pct >= 59 { Self::Normal }
+        else if pct >= 26 { Self::Reduced }
+        else { Self::Off }
+    }
 }
 
 /// Central data model for Wolf CWL ventilation unit
