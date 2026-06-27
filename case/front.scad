@@ -1,11 +1,23 @@
 use <./display_front.scad>
 use <./utils.scad>
 
-module stand(h=15.5, o=10) {
+// Standoff. For SLM 316L the bore is a cored hole tapped after printing
+// (bore = tap-drill diameter: M3->2.5, M4->3.3, M5->4.2). ch = tap lead-in.
+module stand(h=15.5, o=10, bore=4.2, ch=0.8) {
+    eps = 0.1;
     translate([0,0,-5.5])
     difference() {
         cylinder(d=o, h=h, $fn=64);
-        cylinder(d=4.2, h=h, $fn=64);
+        // cored hole for tapping
+        translate([0,0,-eps])
+            cylinder(d=bore, h=h+2*eps, $fn=64);
+        // lead-in chamfers so the tap starts square from either end
+        if (standoff_chamfers) {
+            translate([0,0,-eps])
+                cylinder(d1=bore+2*ch, d2=bore, h=ch+eps, $fn=64);
+            translate([0,0,h-ch])
+                cylinder(d1=bore, d2=bore+2*ch, h=ch+eps, $fn=64);
+        }
     }
 }
 
@@ -31,6 +43,15 @@ case_width = 110;
 case_length = 72;
 case_radius = 10;
 h=20;
+standoff_chamfers = true;   // lead-in chamfers on the standoff screw holes
+
+// Solid (un-hollowed) outer body of the case, used to trim braces so they
+// conform to the rounded corner instead of poking through the wall.
+module case_outer_solid() {
+    translate([0,0,-10])
+        linear_extrude(height=h+offset)
+            rounded_rectangle(width=case_width, length=case_length, r=case_radius, fn=64);
+}
 
 // Wall-mount ear: 2mm thick tab sticking out from the case side,
 // flush with the bottom plane. long=true gives an adjustment slot.
@@ -135,8 +156,8 @@ difference() {
             rounded_rectangle(width=case_width-border*2, length=19, r=case_radius-border, fn=64);
 
     // Ethernet cutout
-    translate([0,41+3+6,-8-3])
-        cube([10,25-2.7-6,20-5.5+3]);
+    translate([0,50,-11])
+        cube([10,17.5,17.5]);
 
     // Kabel
     translate([-5,41+5,0])
@@ -171,6 +192,34 @@ difference() {
                                 long_hole(len, sw);
 }
 
-translate([case_width-8.3, case_length-6.6, 0])
-    stand(h=15.5+2, o=8);
+translate([case_width-8.3, case_length-6.6, 0]) {
+    difference() {
+        union() {
+            stand(h=15.5+2, o=8);
+
+            // brace into the corner with long holes toward both walls (+x, +y).
+            // overshoot, then trim to the case outer surface so the ribs follow
+            // the rounded corner and never poke through the wall.
+            intersection() {
+                translate([0, 0, -5.5])
+                    linear_extrude(height=15.5+2) {
+                        rotate([0, 0, 90]) translate([-4, -4]) long_hole(14, 8);
+                        translate([-4, -4]) long_hole(16, 8);
+                    }
+                translate([-(case_width-8.3), -(case_length-6.6), 0])
+                    case_outer_solid();
+            }
+        }
+
+        // re-cut the screw hole (and both lead-in chamfers) the braces filled
+        translate([0, 0, -5.5-0.1])
+            cylinder(d=4.2, h=15.5+2+0.2, $fn=64);
+        if (standoff_chamfers) {
+            translate([0, 0, 12-0.8])
+                cylinder(d1=4.2, d2=4.2+1.6, h=0.8+0.1, $fn=64);
+            translate([0, 0, -5.5-0.1])
+                cylinder(d1=4.2+1.6, d2=4.2, h=0.8+0.1, $fn=64);
+        }
+    }
+}
 
