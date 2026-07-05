@@ -190,6 +190,10 @@ The BM remote polls the CWL in a fixed cycle of approximately 11 seconds contain
 
 ## ESP32 Firmware Guide
 
+The firmware serves a web UI with live status and a 24 h history view — supply/exhaust temperatures, indoor/outdoor humidity and enthalpy, bypass state, and ventilation level changes annotated with the reason for each switch:
+
+![Temperature history (24 h) in the web UI](docs/temperature-history.png)
+
 ### Minimal Polling Loop
 
 To replicate the BM's communication, the ESP32 firmware should send these requests in a loop (~1 second between each):
