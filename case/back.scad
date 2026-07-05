@@ -1,104 +1,60 @@
-use <./display_front.scad>
 use <./utils.scad>
+use <./front.scad>          // mounting_latch
+include <./case_config.scad>
 
-module stand(h=15.5) {
-    translate([0,0,-5.5])
-    difference() {
-        cylinder(d=10, h=h, $fn=64);
-        cylinder(d=4.2, h=h, $fn=64);
-    }
-}
+// ============================ Back plate ============================
+// Flat plate closing the open back of the case. A small step nests inside the
+// front's cavity to locate it, and it carries the same mounting ears as the
+// front. Modelled flat-face-down (z=0) for printing.
 
-module stand_hole(h=15.5) {
-    translate([0,0,21.5])
-        difference() {
-            *cylinder(d=4.2, h=h, $fn=64);
-            cylinder(d1=4.2, d2=8, h=3, $fn=64);
-        }
-}
+plate_t       = 1;     // flat plate thickness
+step_h        = 3;   // locating lip height (sits inside the front cavity)
+fit_clearance = 0.5;   // gap between the lip and the inner cavity wall
 
-module stands() {
-    translate([-91.2/2, 0, 0])
-        for (i = [0:1]) {
-            for (j = [0:1]) {
-                translate([i*91.8, j*42, 0])
-                    stand();
-            }
-        }
+module back_plate() {
+    inset = border + fit_clearance;   // lip distance from the outer edge
+    lip_w = back_lip_w;               // lip wall thickness (a thin locating line)
 
-    translate([-91.2/2, 80, 0]) {
-        stand(h=15.5);
-        translate([91.8, 0, 0])
-            stand(h=15.5);
-    }
-}
-
-module stands_holes() {
-    translate([-91.2/2, 0, 0])
-        for (i = [0:1]) {
-            for (j = [0:1]) {
-                translate([i*91.8, j*42, 0])
-                    stand_hole();
-            }
-        }
-
-    translate([-91.2/2, 80, 0]) {
-        stand_hole(h=15.5);
-        translate([91.8, 0, 0])
-            stand_hole(h=15.5);
-    }
-}
-
-
-module case_back() {
-    case_width = 110;
-    case_length = 97;
-    case_radius = 10;
-
-    border=2;
-
-    control_x=23;
-    control_y=34-4.8;
-    display_x=16-4.2;
+    // closed flat plate on the case outer footprint
+    linear_extrude(height=plate_t)
+        rounded_rectangle(width=cw, length=cl, r=case_radius, fn=64);
 
     difference() {
-        union() {
-            difference() {
-                union() {
-                    difference() {
-                        linear_extrude(height=22.5+border)
-                            rounded_rectangle(width=case_width, length=case_length, r=case_radius, fn=64);
-
-                        translate([border, border, -border])
-                            linear_extrude(height=22.5+border)
-                                rounded_rectangle(width=case_width-border*2, length=case_length-border*2, r=case_radius-border, fn=64);
-
-                    }
+        // thin locating lip stepping up into the cavity
+        translate([0, 0, plate_t])
+            linear_extrude(height=step_h)
+                difference() {
+                    translate([inset, inset])
+                        rounded_rectangle(width=cw-2*inset, length=cl-2*inset,
+                        r=case_radius-inset, fn=64);
+                    translate([inset+lip_w, inset+lip_w])
+                        rounded_rectangle(width=cw-2*(inset+lip_w), length=cl-2*(inset+lip_w),
+                        r=case_radius-inset-lip_w, fn=64);
                 }
-            }
 
-            translate([case_width/2,9,13])
-                stands();
+        translate([0, 0, plate_t])
+            cube([20,20,10]);
+
+        translate([cw-20, 0, plate_t])
+            cube([20,20,10]);
+
+        translate([0, cl-20, 0]) {
+            translate([0, 0, plate_t])
+                cube([20,20,10]);
+
+            translate([cw-20, 0, plate_t])
+                cube([20,20,10]);
         }
-
-        translate([case_width/2,9,0])
-            stands_holes();
-
-        // ethernet cutout
-        translate([case_width/2-5,case_length-5,-.5])
-            cube([17, 30, 18]);
-
-        // power
-        translate([10,case_length-25,-.5])
-            rotate([0,0,90])
-                cube([10, 30, 18]);
-
-
     }
-
-
-
 }
 
-case_back();
+back_plate();
 
+// Mounting ears (same as the front): left round hole, right adjustment slot,
+// flush with the flat outer face.
+translate([0,  cl/2 - 6, 0])
+    mirror([1,0,0])
+        mounting_latch(long=false, t=latch_h_back);
+
+translate([cw, cl/2 - 6, 0])
+    mounting_latch(long=true, t=latch_h_back);

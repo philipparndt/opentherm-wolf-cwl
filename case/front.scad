@@ -2,33 +2,9 @@ use <./display_front.scad>
 use <./utils.scad>
 
 // ============================ Parameters ============================
-offset      = 3;
-border      = 2;
-case_width  = 110;
-case_length = 72;
-case_radius = 10;
-h           = 20;
-
-standoff_chamfers = true;   // lead-in chamfers on the standoff screw holes
-slim              = true;   // pull bottom + left + right walls in to the round standoffs
-slim_inset        = 0.9;    // clearance between each round standoff edge and the inner wall
-
-// Round standoff centres (PCB-fixed), as placed by stands().
-rstand_o  = 10;
-rstand_xL = case_width/2 - 45.6;   // 9.4
-rstand_xR = case_width/2 + 46.2;   // 101.2
-rstand_y  = 9;
-
-// Case outer boundary. slim brings bottom/left/right in to the standoffs; top fixed.
-x0 = slim ? rstand_xL - rstand_o/2 - slim_inset - border : 0;
-x1 = slim ? rstand_xR + rstand_o/2 + slim_inset + border : case_width;
-y0 = slim ? rstand_y  - rstand_o/2 - slim_inset - border : 0;
-y1 = case_length;
-cw = x1 - x0;        // outer width
-cl = y1 - y0;        // outer length
-
-bottom_z   = -10;    // z of the case floor / wall bottom
-stand_sink = 5.5;    // how far a standoff body drops below z = 0
+// Shared parameters and derived boundary live in case_config.scad so the back
+// plate stays dimensionally in sync.
+include <./case_config.scad>
 
 // ============================ Helper modules ============================
 
@@ -106,13 +82,12 @@ module stands() {
 
 // Wall-mount ear: 2mm thick tab sticking out from the case side, flush with the
 // bottom plane. long=true gives an adjustment slot instead of a round hole.
-module mounting_latch(long=false) {
+module mounting_latch(long=false, t=2) {
     ear_w   = 12;   // width along the wall (y)
     hole_x  = 6.5;  // hole centre distance from the wall (x)
     tail    = 4;    // material beyond the hole centre (x)
     ear_l   = hole_x + tail;
     overlap = border;   // reach into the wall only, not the interior cavity
-    t       = 2;    // thickness (z)
     r       = 3;    // corner radius
     hole_d  = 4;
     slot    = 4;    // extra travel for the long hole
@@ -180,9 +155,9 @@ module case_front() {
             // Mounting ears (left: round hole, right: adjustment slot)
             translate([x0, (y0+y1)/2 - 6, bottom_z])
                 mirror([1,0,0])
-                    mounting_latch(long=false);
+                    mounting_latch(long=false, t=latch_h_front);
             translate([x1, (y0+y1)/2 - 6, bottom_z])
-                mounting_latch(long=true);
+                mounting_latch(long=true, t=latch_h_front);
         }
 
         translate([display_x, display_y, 10-4])
