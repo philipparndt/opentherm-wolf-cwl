@@ -91,6 +91,10 @@ pub struct CwlData {
     pub dhw_active: bool,
     pub filter_dirty: bool,
     pub diag_event: bool,
+    // Raw ID 70 response bytes, kept so the web API can expose which of the
+    // OR'd filter sources (LO bit 5 / HI bit 4 / OEM code 6) is active.
+    pub status_hi: u8,
+    pub status_lo: u8,
 
     // Fault info from ID 72
     pub fault_flags: u8,
@@ -152,6 +156,8 @@ impl Default for CwlData {
             dhw_active: false,
             filter_dirty: false,
             diag_event: false,
+            status_hi: 0,
+            status_lo: 0,
             fault_flags: 0,
             oem_fault_code: 0,
             slave_flags: 0,

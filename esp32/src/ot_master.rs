@@ -172,27 +172,27 @@ impl OtMaster {
                 (req, Box::new(|resp, st| {
                     let hi = ((resp >> 8) & 0xFF) as u8;
                     let lo = (resp & 0xFF) as u8;
+                    st.cwl_data.status_hi = hi;
+                    st.cwl_data.status_lo = lo;
                     st.cwl_data.ventilation_active = (hi >> 1) & 0x01 != 0;
                     st.cwl_data.cooling_active = (hi >> 2) & 0x01 != 0;
                     st.cwl_data.dhw_active = (hi >> 3) & 0x01 != 0;
-                    // Filter signal sources, in order of reliability for this
-                    // hardware:
-                    //   * Status LO bit 5 — empirical, confirmed across BM
-                    //     and PCB captures. This is the OEM channel Wolf
-                    //     (Brink / Viessmann) uses.
-                    //   * Status HI bit 4 — OpenTherm V/H spec filter bit.
-                    //     Wolf doesn't set it but we still honour it for
-                    //     spec-compliant units.
-                    //   * Fault OEM code 6 — earlier hypothesis from one
-                    //     capture (FIL2); kept as a fallback though we
-                    //     no longer trust it as the primary signal.
-                    let filter_bit_hi = (hi >> 4) & 0x01 != 0;
-                    let filter_bit_lo = (lo >> 5) & 0x01 != 0;
+                    // Filter signal: Status LO bit 5 only. The LO byte is the
+                    // slave status per the OT V/H spec; bit 5 is unassigned in
+                    // the spec but Wolf (Brink / Viessmann) uses it as the
+                    // filter-check bit — confirmed in FIL_CLEAN.sal (LO
+                    // 0x26→0x06 during a FIL reset on the unit).
+                    // Former fallbacks removed as false-positive sources:
+                    //   * Status HI bit 4 is just the echo of our own master
+                    //     status (our filter-reset bit), never slave data.
+                    //   * OEM fault code 6 (ID 72) is a diagnostic status
+                    //     code, not the filter message — observed with LO
+                    //     bit 5 clear and no FIL on the unit's display.
                     let was_dirty = st.cwl_data.filter_dirty;
-                    st.cwl_data.filter_dirty = filter_bit_lo
-                        || filter_bit_hi
-                        || st.cwl_data.oem_fault_code == 6;
-                    st.cwl_data.diag_event = (hi >> 5) & 0x01 != 0;
+                    st.cwl_data.filter_dirty = (lo >> 5) & 0x01 != 0;
+                    // Diagnostic indication is slave status LO bit 6 per the
+                    // V/H spec (HI bit 5 was the echo of our own request).
+                    st.cwl_data.diag_event = (lo >> 6) & 0x01 != 0;
                     if st.cwl_data.filter_dirty != was_dirty {
                         info!(
                             "OT: filter_dirty {} (status HI=0x{:02X} LO=0x{:02X}, oem_fault_code={})",
@@ -297,11 +297,6 @@ impl OtMaster {
                     let code = (resp & 0xFF) as u8;
                     let prev_code = st.cwl_data.oem_fault_code;
                     st.cwl_data.oem_fault_code = code;
-                    // Mirror filter detection here so a fresh OEM code is reflected
-                    // immediately (the Status handler reads the value cached here).
-                    if code == 6 {
-                        st.cwl_data.filter_dirty = true;
-                    }
                     if code != prev_code {
                         info!("OT: oem_fault_code {} -> {}", prev_code, code);
                     }

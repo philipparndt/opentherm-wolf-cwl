@@ -33,7 +33,7 @@ Everything needed to control the Wolf CWL via OpenTherm:
 | **Read ventilation %** | Read-Data ID 77 |
 | **Read bypass state** | Check `ventilation` bit (bit 1 HI byte) in ID 70 response |
 | **Read fault status** | ID 72 (`Fault flags/code V/H`) — the HI-byte `fault` bit in ID 70 is *not* reliable on Wolf CWL, see notes below |
-| **Read filter status** | Check **bit 5 of the LO byte** in ID 70 response (Wolf OEM extension; the spec's HI bit 4 is unused on this hardware) |
+| **Read filter status** | Check **bit 5 of the LO byte** in ID 70 response (Wolf OEM use of a spec-reserved slave-status bit; the response HI byte is only an echo of the master flags) |
 
 ### Supported OpenTherm Data IDs
 
@@ -68,30 +68,27 @@ The Status V/H exchange carries control flags in **both directions**. This is th
 | 4 | filter | Filter timer reset (set briefly after filter replacement) |
 | 5 | diag | Diagnostics request |
 
-**Slave → Master (HI byte of Read-Ack response):**
+**Slave → Master (Read-Ack response):**
+
+The **HI byte of the Read-Ack is an echo of the master status flags** from the request — it carries no slave state. (Earlier revisions of this document interpreted it as a slave status byte and described a "permanently latched fault bit"; that was our own always-set ventilation-enable bit coming back.)
+
+The actual slave status is the **LO byte**, laid out as in the OpenTherm V/H spec:
 
 | Bit | Name | Description |
 |-----|------|-------------|
-| 0 | fault | Fault indication. **On the Wolf CWL this bit is set continuously and is not a usable fault signal** — see notes below. |
-| 1 | ventilation | Ventilation/bypass active (confirms bypass state) |
-| 2 | cooling | Cooling active |
-| 3 | dhw | DHW active |
-| 4 | filter | Spec filter bit — **Wolf CWL never sets this**, see LO byte instead |
-| 5 | diag | Diagnostic event active |
+| 0 | fault | Fault indication |
+| 1 | ventilation | Ventilation mode active |
+| 2 | bypass | Bypass status (1 = open) |
+| 3 | bypass auto | Bypass automatic mode |
+| 4 | free vent | Free ventilation status |
+| 5 | **filter** | **Filter replacement required (1 = service due, 0 = OK).** Reserved in the spec; used by Wolf (Brink Renovent / Viessmann Vitovent OEM siblings) as the filter-check bit. |
+| 6 | diag | Diagnostic indication |
 
-**Slave → Master (LO byte of Read-Ack response — OEM extension, Wolf/Brink/Viessmann):**
+Bit 5 was confirmed in `FIL_CLEAN.sal`, which captures the live transition during a filter-reset: LO went from `0x26` → `0x06` (bit 5 cleared) while HI stayed at `0x03` and ID 72 (Fault flags/code) stayed at `0x0000` throughout.
 
-The LO byte of the Status V/H response is undocumented in the OpenTherm V/H spec but is used by Wolf (and its Brink Renovent / Viessmann Vitovent OEM siblings) to carry additional status. The only bit confirmed so far is:
+> **Do not derive filter status from ID 72.** An OEM fault code of 6 was once assumed to mean "filter dirty" (FIL2 hypothesis), but a live unit was observed reporting ID 72 = `0x0006` together with LO bit 6 (diagnostic indication) while the filter was clean and the CWL display showed no FIL — code 6 is a diagnostic status code, not the filter message. LO bit 5 is the only reliable filter signal.
 
-| Bit | Name | Description |
-|-----|------|-------------|
-| 5 | **filter** | **Filter replacement required (1 = service due, 0 = OK)** |
-
-This was confirmed in `FIL_CLEAN.sal`, which captures the live transition during a filter-reset: LO went from `0x26` → `0x06` (bit 5 cleared) while HI stayed at `0x03` and ID 72 (Fault flags/code) stayed at `0x0000` throughout. The HI-byte `filter` bit and the OEM fault code in ID 72 are **not** reliable signals for filter status on this hardware.
-
-The bypass is controlled by setting/clearing **bit 1 of the HI byte** in every Status V/H request. The slave confirms the state via the `ventilation` bit in the response.
-
-> **Note on the fault bit.** On Wolf CWL units the HI byte's `fault` bit (bit 0) is set as a steady-state, regardless of actual fault state — observed across BM-driven captures, filter-dirty captures, and filter-clean captures. Do not key fault indication off this bit; if a real fault is present, ID 72 (`Fault flags/code V/H`) is the place to check.
+The bypass is controlled by setting/clearing **bit 1 of the HI byte** in every Status V/H request; the actual damper state is reported in LO bit 2 (and TSP 54).
 
 ### Ventilation Level Control
 

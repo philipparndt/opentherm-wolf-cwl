@@ -227,6 +227,16 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "bypass": d.ventilation_active,
                 "connected": d.connected,
             },
+            // Raw OT values behind the derived flags above, to trace which
+            // source set e.g. filter_dirty (ID 70 LO bit 5 / HI bit 4 / OEM 6).
+            "debug": {
+                "statusHi": d.status_hi,
+                "statusLo": d.status_lo,
+                "faultFlags": d.fault_flags,
+                "oemFaultCode": d.oem_fault_code,
+                "diagEvent": d.diag_event,
+                "tspFilterMessage": if d.tsp_valid[23] { Some(d.tsp_values[23]) } else { None },
+            },
             "system": {
                 "uptime": unsafe { esp_idf_svc::sys::esp_timer_get_time() / 1_000_000 },
                 "freeHeap": unsafe { esp_idf_svc::sys::esp_get_free_heap_size() },
