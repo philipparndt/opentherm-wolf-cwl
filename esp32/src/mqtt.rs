@@ -1,5 +1,6 @@
 //! MQTT client — publish sensor data, subscribe to commands.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use esp_idf_svc::mqtt::client::{EspMqttClient, EspMqttEvent, EventPayload, MqttClientConfiguration, QoS};
@@ -11,7 +12,26 @@ use crate::cwl_data::ventilation_level_name;
 type AppState = Arc<Mutex<AppStateInner>>;
 
 const SENSOR_INTERVAL_MS: u32 = 11_000;
-const HEALTH_INTERVAL_MS: u32 = 60_000;
+const HEALTH_INTERVAL_MS: u32 = 300_000;
+
+/// Cadence for the command/acknowledgement block (`publish_command_state`).
+///
+/// A `set/*` command lands in `AppStateInner` immediately but only reaches the
+/// unit on the next OpenTherm poll cycle, and is only confirmed a cycle later.
+/// Publishing that block on the 11 s sensor tick meant an external consumer saw
+/// *nothing* for up to 11 s after its own command — long enough for it to
+/// conclude the command was lost. At 1 s the echo is effectively instant; the
+/// change filter means an idle device still sends nothing.
+const FAST_INTERVAL_MS: u32 = 1_000;
+
+/// How often every state topic is republished even when nothing changed.
+///
+/// State topics are published change-only (see `pub_state`), which cuts the
+/// message rate by roughly an order of magnitude. This periodic full pass is
+/// the safety net: it refreshes the broker's retained copies (a broker restart
+/// without persistence drops them) and gives time-series consumers a guaranteed
+/// sample floor for values that sit still for hours.
+const FULL_REFRESH_INTERVAL_MS: u32 = 900_000;
 
 pub struct MqttManager {
     client: EspMqttClient<'static>,
@@ -29,6 +49,20 @@ pub struct MqttManager {
     /// Humidity-sensor topics we've already subscribed to (so config edits add
     /// new subscriptions on the next tick without a reboot).
     subscribed_sensors: Vec<String>,
+    /// Last payload published per state sub-topic. A tick only puts a message on
+    /// the wire when the formatted payload actually differs, which is what keeps
+    /// the ~35 retained topics from emitting ~3 messages/second around the clock.
+    /// Formatting happens before the compare, so the printed precision (0.1 °C,
+    /// 0.01 kJ/kg …) doubles as the deadband.
+    published: HashMap<String, String>,
+    /// Timestamp of the last unconditional full publish.
+    last_full_ms: u32,
+    /// Timestamp of the last command/acknowledgement publish.
+    last_fast_ms: u32,
+    /// When set, the next publish pass bypasses the change check and sends
+    /// everything. Set at boot, on every broker reconnect, and every
+    /// `FULL_REFRESH_INTERVAL_MS`.
+    force_full: bool,
 }
 
 /// Sensor barometers report hPa (e.g. 960.9); enthalpy wants kPa. Values that
@@ -98,6 +132,10 @@ impl MqttManager {
             connected: true,
             last_connected: false,
             subscribed_sensors: Vec::new(),
+            published: HashMap::new(),
+            last_full_ms: 0,
+            last_fast_ms: 0,
+            force_full: true,
         })
     }
 
@@ -169,20 +207,39 @@ impl MqttManager {
         if now_connected && !self.last_connected {
             self.setup_subscriptions();
             self.subscribed_sensors.clear();
+            // A reconnect may mean the broker restarted and lost every retained
+            // message, so forget what we believe is on the broker and resend the
+            // full state instead of only the deltas.
+            self.published.clear();
+            self.force_full = true;
         }
         self.last_connected = now_connected;
 
         // Pick up newly-configured sensor topics (cheap; no-op when unchanged).
         self.sync_sensor_subscriptions();
 
-        if now_ms.wrapping_sub(self.last_publish_ms) >= SENSOR_INTERVAL_MS {
+        if now_ms.wrapping_sub(self.last_full_ms) >= FULL_REFRESH_INTERVAL_MS {
+            self.force_full = true;
+        }
+
+        if self.force_full || now_ms.wrapping_sub(self.last_fast_ms) >= FAST_INTERVAL_MS {
+            self.last_fast_ms = now_ms;
+            self.publish_command_state();
+        }
+
+        if self.force_full || now_ms.wrapping_sub(self.last_publish_ms) >= SENSOR_INTERVAL_MS {
             self.last_publish_ms = now_ms;
             self.publish_sensor_data();
         }
 
-        if now_ms.wrapping_sub(self.last_health_ms) >= HEALTH_INTERVAL_MS {
+        if self.force_full || now_ms.wrapping_sub(self.last_health_ms) >= HEALTH_INTERVAL_MS {
             self.last_health_ms = now_ms;
             self.publish_health_data();
+        }
+
+        if self.force_full {
+            self.force_full = false;
+            self.last_full_ms = now_ms;
         }
 
         // Retained RAM-only state persistence — published only when a producer
@@ -252,21 +309,75 @@ impl MqttManager {
         self.pub_retained("persist/extreme_heat", &json);
     }
 
+    /// Command / acknowledgement state — everything a consumer needs to mirror
+    /// the web UI's optimistic behaviour after issuing a `set/*` command:
+    ///
+    /// * `ventilation/requested` moves the instant the command is accepted,
+    ///   before the unit has seen it (what the UI highlights right away),
+    /// * `ventilation/actual` is the unit's real running level from ID 77
+    ///   (what the UI waits for to clear its spinner),
+    /// * `ventilation/pending` is the derived "not applied yet" flag.
+    ///
+    /// Published on the fast tick and change-filtered like everything else.
+    fn publish_command_state(&mut self) {
+        let mut msgs: Vec<(&'static str, String)> = Vec::with_capacity(16);
+        {
+            let st = self.state.lock().unwrap();
+            let d = &st.cwl_data;
+
+            // The level the device is driving toward. Every source funnels into
+            // this field — MQTT set/level, the web API, the encoder, schedules
+            // and extreme-heat mode — so the optimistic echo covers all of them,
+            // not just MQTT-issued commands.
+            let requested = st.requested_vent_level.min(3);
+            // The level the unit is actually running, mapped from the reported
+            // relative ventilation (ID 77) exactly like the UI's `actualLevel`.
+            let actual = crate::cwl_data::VentLevel::from_relative_pct(d.relative_ventilation) as u8;
+
+            msgs.push(("ventilation/requested", requested.to_string()));
+            msgs.push(("ventilation/requested_name", ventilation_level_name(requested).into()));
+            msgs.push(("ventilation/actual", actual.to_string()));
+            msgs.push(("ventilation/pending", if requested != actual { "1" } else { "0" }.into()));
+            // The raw ID 77 reading `actual` is derived from — same tick, so a
+            // consumer watching either sees the confirmation at the same moment.
+            msgs.push(("ventilation/relative", d.relative_ventilation.to_string()));
+            // The unit's acknowledgement of our ID 71 write — kept for
+            // compatibility; it trails `requested` by up to one poll cycle.
+            msgs.push(("ventilation/level", d.ventilation_level.to_string()));
+            msgs.push(("ventilation/level_name", ventilation_level_name(d.ventilation_level).into()));
+
+            msgs.push(("status/connected", if d.connected { "1" } else { "0" }.into()));
+            msgs.push(("status/filter", if d.filter_dirty { "1" } else { "0" }.into()));
+            msgs.push(("status/bypass", if d.ventilation_active { "1" } else { "0" }.into()));
+
+            // `bypass/mode` is the requested state (optimistic), `status/bypass`
+            // the unit-reported one — same requested/actual split as the level.
+            msgs.push(("bypass/mode", if st.requested_bypass_open { "summer" } else { "winter" }.into()));
+            msgs.push(("bypass/pending",
+                if st.requested_bypass_open != d.ventilation_active { "1" } else { "0" }.into()));
+
+            msgs.push(("schedule/active", if st.schedule_active { "1" } else { "0" }.into()));
+            msgs.push(("schedule/override", if st.schedule_override { "1" } else { "0" }.into()));
+            msgs.push(("off_timer/active", if st.timed_off_active { "1" } else { "0" }.into()));
+            msgs.push(("off_timer/remaining", st.timed_off_remaining_min.to_string()));
+        }
+
+        for (sub_topic, payload) in &msgs {
+            self.pub_state(sub_topic, payload);
+        }
+    }
+
     fn publish_sensor_data(&mut self) {
         let st = self.state.lock().unwrap();
         let d = &st.cwl_data;
 
-        // Collect all topic/payload pairs while holding the lock
+        // Collect all topic/payload pairs while holding the lock. Command state
+        // (level, bypass, schedule, off-timer flags) is not here — it rides the
+        // 1 s tick in publish_command_state() so commands echo promptly.
         let mut msgs: Vec<(String, String)> = Vec::with_capacity(25);
 
-        msgs.push(("ventilation/level".into(), d.ventilation_level.to_string()));
-        msgs.push(("ventilation/level_name".into(), ventilation_level_name(d.ventilation_level).into()));
-        msgs.push(("ventilation/relative".into(), d.relative_ventilation.to_string()));
         msgs.push(("temperature/supply".into(), format!("{:.1}", d.supply_temp)));
         msgs.push(("temperature/exhaust".into(), format!("{:.1}", d.exhaust_temp)));
-
-        msgs.push(("status/filter".into(), if d.filter_dirty { "1" } else { "0" }.into()));
-        msgs.push(("status/bypass".into(), if d.ventilation_active { "1" } else { "0" }.into()));
 
         if d.supports_id84 { msgs.push(("fan/exhaust_speed".into(), d.exhaust_fan_speed.to_string())); }
         if d.supports_id85 { msgs.push(("fan/supply_speed".into(), d.supply_fan_speed.to_string())); }
@@ -278,12 +389,6 @@ impl MqttManager {
         if d.tsp_valid[66] { msgs.push(("pressure/output_duct".into(), d.output_duct_pressure.to_string())); }
         if d.tsp_valid[68] { msgs.push(("status/frost".into(), d.frost_status.to_string())); }
 
-        msgs.push(("schedule/active".into(), if st.schedule_active { "1" } else { "0" }.into()));
-        msgs.push(("schedule/override".into(), if st.schedule_override { "1" } else { "0" }.into()));
-        msgs.push(("bypass/mode".into(), if st.requested_bypass_open { "summer" } else { "winter" }.into()));
-
-        msgs.push(("off_timer/active".into(), if st.timed_off_active { "1" } else { "0" }.into()));
-        msgs.push(("off_timer/remaining".into(), st.timed_off_remaining_min.to_string()));
         msgs.push(("bypass/schedule_active".into(), "0".into()));
         msgs.push(("bypass/override".into(), "0".into()));
 
@@ -310,7 +415,7 @@ impl MqttManager {
         drop(st); // Release lock before publishing
 
         for (sub_topic, payload) in &msgs {
-            self.pub_retained(sub_topic, payload);
+            self.pub_state(sub_topic, payload);
         }
     }
 
@@ -318,11 +423,11 @@ impl MqttManager {
         let uptime = unsafe { esp_idf_svc::sys::esp_timer_get_time() / 1_000_000 };
         let free_heap = unsafe { esp_idf_svc::sys::esp_get_free_heap_size() };
 
-        self.pub_retained("health/uptime", &uptime.to_string());
-        self.pub_retained("health/free_heap", &free_heap.to_string());
-        self.pub_retained("health/reboot_reason", crate::watchdog::reboot_reason());
-        self.pub_retained("health/crash_count", "0");
-        self.pub_retained("health/last_panic", &crate::panic_capture::last_panic().unwrap_or_default());
+        self.pub_state("health/uptime", &uptime.to_string());
+        self.pub_state("health/free_heap", &free_heap.to_string());
+        self.pub_state("health/reboot_reason", crate::watchdog::reboot_reason());
+        self.pub_state("health/crash_count", "0");
+        self.pub_state("health/last_panic", &crate::panic_capture::last_panic().unwrap_or_default());
 
         let ot_age = {
             let st = self.state.lock().unwrap();
@@ -333,9 +438,33 @@ impl MqttManager {
                 0
             }
         };
-        self.pub_retained("health/ot_response_age", &ot_age.to_string());
+        self.pub_state("health/ot_response_age", &ot_age.to_string());
     }
 
+    /// Publish a state topic, but only if its payload changed since the last
+    /// time we sent it (or a full refresh is due). Retained delivery means a
+    /// late subscriber still gets the current value immediately, so skipping
+    /// unchanged repeats costs consumers nothing.
+    fn pub_state(&mut self, sub_topic: &str, payload: &str) {
+        if !self.force_full {
+            if self.published.get(sub_topic).map(|p| p == payload).unwrap_or(false) {
+                return;
+            }
+        }
+        self.pub_retained(sub_topic, payload);
+        match self.published.get_mut(sub_topic) {
+            Some(prev) => {
+                prev.clear();
+                prev.push_str(payload);
+            }
+            None => {
+                self.published.insert(sub_topic.to_string(), payload.to_string());
+            }
+        }
+    }
+
+    /// Publish unconditionally (bridge markers and the retained `persist/*`
+    /// snapshots, which are already emitted only on demand).
     fn pub_retained(&mut self, sub_topic: &str, payload: &str) {
         let topic = format!("{}/{}", self.base_topic, sub_topic);
         let _ = self.client.publish(&topic, QoS::AtMostOnce, true, payload.as_bytes());
@@ -485,12 +614,27 @@ fn handle_command(topic: &str, message: &str, state: &AppState, _base_topic: &st
     } else if topic.ends_with("/set/off_timer") {
         // Payload is minutes (15..=20160). Range covers the encoder table:
         // 15m through 2w.
-        if let Ok(minutes) = message.trim().parse::<u16>() {
+        //
+        // `0` (and the word forms) cancels a running timer — the MQTT
+        // equivalent of the UI's Cancel button, which posts to
+        // /api/off_timer/cancel. Without this a client could start timed-off
+        // mode over MQTT but had no way to end it: 0 parsed fine, then fell out
+        // of the range check and was dropped in silence.
+        let msg = message.trim();
+        if matches!(msg, "0" | "off" | "false" | "cancel") {
+            st.cancel_timed_off = true;
+            st.display_wake_requested = true;
+            info!("MQTT: Timed off cancelled");
+        } else if let Ok(minutes) = msg.parse::<u16>() {
             if (15..=20160).contains(&minutes) {
                 st.timed_off_request = Some(minutes);
                 st.display_wake_requested = true;
                 info!("MQTT: Timed off requested for {} min", minutes);
+            } else {
+                warn!("MQTT: Ignoring off_timer={} (expected 0 to cancel, or 15..=20160)", minutes);
             }
+        } else {
+            warn!("MQTT: Ignoring unparseable off_timer payload {:?}", msg);
         }
     }
 }
