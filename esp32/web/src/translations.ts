@@ -12,6 +12,7 @@ export interface Translations {
   summerMode: string; bypassFrom: string; bypassTo: string
   wifi: string; ssid: string; mqtt: string; server: string; port: string; topic: string
   authEnabled: string; webUi: string; saveSettings: string; language: string
+  requireLogin: string; noLoginWarning: string
   english: string; german: string
   backupRestore: string; exportBackup: string; importBackup: string; backupRestored: string
   systemInfo: string; firmwareUpdate: string; uploadFirmware: string; uploading: string; updateSuccessful: string
@@ -94,6 +95,8 @@ const en: Translations = {
   topic: 'Topic',
   authEnabled: 'Authentication',
   webUi: 'Web UI',
+  requireLogin: 'Require login',
+  noLoginWarning: 'Login is disabled — anyone who can reach this device on the network can read and change all settings.',
   saveSettings: 'Save Settings',
   language: 'Language',
   english: 'English',
@@ -230,6 +233,8 @@ const de: Translations = {
   topic: 'Topic',
   authEnabled: 'Authentifizierung',
   webUi: 'Web UI',
+  requireLogin: 'Anmeldung erforderlich',
+  noLoginWarning: 'Die Anmeldung ist deaktiviert — jeder, der dieses Gerät im Netzwerk erreicht, kann alle Einstellungen lesen und ändern.',
   saveSettings: 'Einstellungen speichern',
   language: 'Sprache',
   english: 'English',

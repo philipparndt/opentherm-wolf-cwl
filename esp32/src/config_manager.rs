@@ -47,7 +47,9 @@ impl ConfigManager {
         config.mqtt_password = self.get_string("mqtt_pass", "");
         config.mqtt_auth_enabled = self.get_bool("mqtt_auth", false);
 
-        // Web UI auth
+        // Web UI auth — defaults to on, so firmware written before this key
+        // existed keeps requiring a login after the update.
+        config.web_auth_enabled = self.get_bool("web_auth", true);
         config.web_username = self.get_string("web_user", "admin");
         config.web_password = self.get_string("web_pass", "admin");
 
@@ -102,6 +104,7 @@ impl ConfigManager {
         self.set_bool("mqtt_auth", config.mqtt_auth_enabled)?;
 
         // Web UI auth
+        self.set_bool("web_auth", config.web_auth_enabled)?;
         self.set_string("web_user", &config.web_username)?;
         self.set_string("web_pass", &config.web_password)?;
 

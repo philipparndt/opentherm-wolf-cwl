@@ -630,11 +630,19 @@ function SettingsTab({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lan
         <button style="padding:6px 12px;font-size:0.85em" onClick={() => setHum({ ...hum, insideTopics: [...hum.insideTopics, ''] })}>{t(lang).addIndoorSensor}</button>
       </div>
       <div class="card">
-        <h3>Web UI</h3>
-        <label>Username</label>
-        <input type="text" value={config.web.username} onInput={(e) => update('web', 'username', (e.target as HTMLInputElement).value)} />
-        <label>Password</label>
-        <input type="password" value={config.web.password} onInput={(e) => update('web', 'password', (e.target as HTMLInputElement).value)} />
+        <h3>{t(lang).webUi}</h3>
+        {/* Firmware predating the toggle omits the field — treat it as "login required". */}
+        <Toggle checked={config.web.authEnabled !== false} onChange={(v) => update('web', 'authEnabled', v)} label={t(lang).requireLogin} />
+        {config.web.authEnabled === false ? (
+          <div class="msg warning" style="margin-top:8px">{t(lang).noLoginWarning}</div>
+        ) : (
+          <>
+            <label>{t(lang).username}</label>
+            <input type="text" value={config.web.username} onInput={(e) => update('web', 'username', (e.target as HTMLInputElement).value)} />
+            <label>{t(lang).password}</label>
+            <input type="password" value={config.web.password} onInput={(e) => update('web', 'password', (e.target as HTMLInputElement).value)} />
+          </>
+        )}
       </div>
       <button onClick={handleSave}>{t(lang).saveSettings}</button>
 

@@ -30,7 +30,10 @@ pub struct AppConfig {
     pub mqtt_password: String,
     pub mqtt_auth_enabled: bool,
 
-    // Web UI auth
+    // Web UI auth. When `web_auth_enabled` is false the UI and the whole REST
+    // API are open to anyone who can reach the device — intended for trusted
+    // LANs / VLANs where a login prompt only gets in the way.
+    pub web_auth_enabled: bool,
     pub web_username: String,
     pub web_password: String,
 
@@ -76,6 +79,7 @@ impl Default for AppConfig {
             mqtt_username: String::new(),
             mqtt_password: String::new(),
             mqtt_auth_enabled: false,
+            web_auth_enabled: true,
             web_username: "admin".to_string(),
             web_password: "admin".to_string(),
             ot_in_pin: 36,
@@ -108,6 +112,7 @@ mod tests {
         assert_eq!(config.mqtt_topic, "wolf-cwl");
         assert_eq!(config.web_username, "admin");
         assert_eq!(config.web_password, "admin");
+        assert!(config.web_auth_enabled);
         assert_eq!(config.ventilation_level, 2);
         assert!(!config.bypass_open);
         assert!(!config.configured);

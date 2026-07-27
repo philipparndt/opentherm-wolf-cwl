@@ -72,6 +72,14 @@ Defined in `Cargo.toml`. The Makefile targets compose these; you rarely need to 
 - `display-rotate` — rotate the OLED 180° for upside-down mounting.
 - `display-sh1106` / (default `ssd1306`) — pick OLED driver chip.
 
+## Web UI login
+
+The UI and the REST API are protected by a cookie login (default `admin` / `admin`, changeable under **Settings → Web UI**).
+
+On a trusted LAN the prompt is mostly friction, so it can be switched off: **Settings → Web UI → Require login**. With it off, `is_authenticated()` short-circuits and every endpoint — including `/api/config`, `/api/restore` and both OTA uploads — is open to anyone who can reach port 80. The toggle is persisted in NVS (`web_auth`) and takes effect immediately, without a reboot; it defaults to **on**, so a firmware update never silently unlocks a device.
+
+The `make ota*` targets log in first and then send the cookie. That still works with the login disabled — `/api/login` accepts any credentials in that mode — so `OTA_USER` / `OTA_PASS` can be left at their defaults.
+
 ## Troubleshooting
 
 ### `Error while connecting to device`

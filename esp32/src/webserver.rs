@@ -16,8 +16,19 @@ use crate::i18n::Language;
 type AppState = Arc<Mutex<AppStateInner>>;
 type HandlerResult = Result<(), EspIOError>;
 
-/// Check if request has a valid auth cookie.
-fn is_authenticated(req: &esp_idf_svc::http::server::Request<&mut EspHttpConnection>) -> bool {
+/// Check if the request may proceed: either login is switched off entirely
+/// (`web.authEnabled == false`) or the request carries a valid auth cookie.
+///
+/// The flag is read from the live config on every request so toggling it in
+/// Settings takes effect immediately, without a reboot. The lock is only held
+/// for the read — callers take their own lock afterwards.
+fn is_authenticated(
+    req: &esp_idf_svc::http::server::Request<&mut EspHttpConnection>,
+    state: &AppState,
+) -> bool {
+    if !state.lock().unwrap().config.web_auth_enabled {
+        return true;
+    }
     req.header("Cookie")
         .map(|c| c.contains("auth_token="))
         .unwrap_or(false)
@@ -136,11 +147,15 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     let s = state.clone();
     server.fn_handler("/api/login", Method::Post, move |mut req| -> HandlerResult {
         let body = read_body(&mut req);
+        // With login switched off every request is already authorized, so accept
+        // the POST unconditionally instead of failing a client that still has the
+        // login form open.
+        let auth_off = !s.lock().unwrap().config.web_auth_enabled;
         if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&body) {
             let username = val["username"].as_str().unwrap_or("");
             let password = val["password"].as_str().unwrap_or("");
             let st = s.lock().unwrap();
-            if username == st.config.web_username && password == st.config.web_password {
+            if auth_off || (username == st.config.web_username && password == st.config.web_password) {
                 let mut resp = req.into_response(200, None, &[
                     ("Content-Type", "application/json"),
                     ("Set-Cookie", "auth_token=valid; Path=/; HttpOnly; Max-Age=86400"),
@@ -157,7 +172,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- GET /api/status ---
     let s = state.clone();
     server.fn_handler("/api/status", Method::Get, move |req| -> HandlerResult {
-        if !is_authenticated(&req) {
+        if !is_authenticated(&req, &s) {
             return send_unauthorized(req);
         }
         let st = s.lock().unwrap();
@@ -284,7 +299,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/ventilation/level ---
     let s = state.clone();
     server.fn_handler("/api/ventilation/level", Method::Post, move |mut req| -> HandlerResult {
-        if !is_authenticated(&req) {
+        if !is_authenticated(&req, &s) {
             return send_unauthorized(req);
         }
         let body = read_body(&mut req);
@@ -309,7 +324,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/ventilation/resume ---
     let s = state.clone();
     server.fn_handler("/api/ventilation/resume", Method::Post, move |req| -> HandlerResult {
-        if !is_authenticated(&req) {
+        if !is_authenticated(&req, &s) {
             return send_unauthorized(req);
         }
         s.lock().unwrap().schedule_override = false;
@@ -319,7 +334,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/encoder ---
     let s = state.clone();
     server.fn_handler("/api/encoder", Method::Post, move |mut req| -> HandlerResult {
-        if !is_authenticated(&req) {
+        if !is_authenticated(&req, &s) {
             return send_unauthorized(req);
         }
         let body = read_body(&mut req);
@@ -334,7 +349,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/off_timer/cancel ---
     let s = state.clone();
     server.fn_handler("/api/off_timer/cancel", Method::Post, move |req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         s.lock().unwrap().cancel_timed_off = true;
         send_ok(req)
     })?;
@@ -342,7 +357,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- GET /api/config ---
     let s = state.clone();
     server.fn_handler("/api/config", Method::Get, move |req| -> HandlerResult {
-        if !is_authenticated(&req) {
+        if !is_authenticated(&req, &s) {
             return send_unauthorized(req);
         }
         let st = s.lock().unwrap();
@@ -362,6 +377,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                 "password": "********",
             },
             "web": {
+                "authEnabled": c.web_auth_enabled,
                 "username": c.web_username,
                 "password": "********",
             },
@@ -391,7 +407,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/config ---
     let s = state.clone();
     server.fn_handler("/api/config", Method::Post, move |mut req| -> HandlerResult {
-        if !is_authenticated(&req) {
+        if !is_authenticated(&req, &s) {
             return send_unauthorized(req);
         }
         let body = read_body(&mut req);
@@ -416,8 +432,13 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                     if v != "********" { st.config.mqtt_password = v.to_string(); }
                 }
             }
-            // Web
+            // Web — the auth toggle must survive a reboot, so persist explicitly
+            // instead of relying on another section having set the flag.
             if let Some(web) = val.get("web") {
+                if let Some(v) = web["authEnabled"].as_bool() {
+                    st.config.web_auth_enabled = v;
+                    st.persist_config = true;
+                }
                 if let Some(v) = web["username"].as_str() { st.config.web_username = v.to_string(); }
                 if let Some(v) = web["password"].as_str() {
                     if v != "********" { st.config.web_password = v.to_string(); }
@@ -470,7 +491,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- GET /api/backup (export all settings + schedules as JSON) ---
     let s = state.clone();
     server.fn_handler("/api/backup", Method::Get, move |req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let st = s.lock().unwrap();
         let c = &st.config;
         let body = json!({
@@ -489,6 +510,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                     "password": c.mqtt_password,
                 },
                 "web": {
+                    "authEnabled": c.web_auth_enabled,
                     "username": c.web_username,
                     "password": c.web_password,
                 },
@@ -526,7 +548,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/restore (import all settings + schedules from JSON) ---
     let s = state.clone();
     server.fn_handler("/api/restore", Method::Post, move |mut req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let body = read_body(&mut req);
         if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&body) {
             let mut st = s.lock().unwrap();
@@ -547,6 +569,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
                     if let Some(v) = mqtt["password"].as_str() { st.config.mqtt_password = v.to_string(); }
                 }
                 if let Some(web) = cfg.get("web") {
+                    if let Some(v) = web["authEnabled"].as_bool() { st.config.web_auth_enabled = v; }
                     if let Some(v) = web["username"].as_str() { st.config.web_username = v.to_string(); }
                     if let Some(v) = web["password"].as_str() { st.config.web_password = v.to_string(); }
                 }
@@ -603,7 +626,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- GET /api/schedules ---
     let s = state.clone();
     server.fn_handler("/api/schedules", Method::Get, move |req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let st = s.lock().unwrap();
         let json_str = serde_json::to_string(&st.schedules).unwrap_or_else(|_| "[]".into());
         send_json_body(req, &json_str)
@@ -612,7 +635,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/schedules ---
     let s = state.clone();
     server.fn_handler("/api/schedules", Method::Post, move |mut req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let body = read_body(&mut req);
         if let Ok(entries) = serde_json::from_slice::<Vec<crate::scheduler::ScheduleEntry>>(&body) {
             let mut st = s.lock().unwrap();
@@ -628,7 +651,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- GET /api/bypass-schedule ---
     let s = state.clone();
     server.fn_handler("/api/bypass-schedule", Method::Get, move |req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let st = s.lock().unwrap();
         let json_str = serde_json::to_string(&st.bypass_schedule).unwrap_or_else(|_| "{}".into());
         send_json_body(req, &json_str)
@@ -637,7 +660,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/bypass-schedule ---
     let s = state.clone();
     server.fn_handler("/api/bypass-schedule", Method::Post, move |mut req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let body = read_body(&mut req);
         if let Ok(schedule) = serde_json::from_slice::<crate::scheduler::BypassSchedule>(&body) {
             let mut st = s.lock().unwrap();
@@ -653,7 +676,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/ota/upload (firmware OTA) ---
     let s = state.clone();
     server.fn_handler("/api/ota/upload", Method::Post, move |mut req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         use esp_idf_svc::sys::*;
 
         // Flush RAM-only state (temperature history + extreme-heat markers) to
@@ -722,8 +745,9 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // in the separate "spiffs" partition, so this endpoint streams a new SPIFFS
     // image straight into it. It does NOT reboot — the caller is expected to push
     // the firmware image afterwards (which reboots, remounting the new filesystem).
+    let s = state.clone();
     server.fn_handler("/api/ota/fs", Method::Post, move |mut req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         use esp_idf_svc::sys::*;
 
         // Locate the SPIFFS partition (label "spiffs", matching partitions.csv).
@@ -800,7 +824,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- GET /api/display (framebuffer for web OLED mirror) ---
     let s = state.clone();
     server.fn_handler("/api/display", Method::Get, move |req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let st = s.lock().unwrap();
         let b64 = base64::engine::general_purpose::STANDARD.encode(&st.display_framebuffer);
         drop(st);
@@ -811,7 +835,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- GET /api/history (temperature history + extreme-heat change markers) ---
     let s = state.clone();
     server.fn_handler("/api/history", Method::Get, move |req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let st = s.lock().unwrap();
         let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
 
@@ -849,7 +873,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // broker.
     let s = state.clone();
     server.fn_handler("/api/history/backup", Method::Get, move |req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let st = s.lock().unwrap();
         let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
         let mut bypass = String::from("[");
@@ -866,7 +890,7 @@ pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOErro
     // --- POST /api/history/restore (load a snapshot from /api/history/backup) ---
     let s = state.clone();
     server.fn_handler("/api/history/restore", Method::Post, move |mut req| -> HandlerResult {
-        if !is_authenticated(&req) { return send_unauthorized(req); }
+        if !is_authenticated(&req, &s) { return send_unauthorized(req); }
         let body = read_body(&mut req);
         let now_epoch = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) } as i64;
         // Points are re-binned relative to "now", so the clock must be valid.

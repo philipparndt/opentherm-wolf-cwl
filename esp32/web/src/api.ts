@@ -35,7 +35,7 @@ export interface Status {
 export interface Config {
   network: { wifiSsid: string; wifiPassword: string }
   mqtt: { enabled: boolean; server: string; port: number; topic: string; authEnabled: boolean; username: string; password: string }
-  web: { username: string; password: string }
+  web: { authEnabled: boolean; username: string; password: string }
   pins: { otIn: number; otOut: number; sda: number; scl: number; encClk: number; encDt: number; encSw: number }
   extremeHeat?: { enabled: boolean }
   humidity?: { insideTopics: string[]; outsideTopics: string[]; protectionEnabled: boolean }
