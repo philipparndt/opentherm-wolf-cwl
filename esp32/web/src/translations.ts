@@ -37,10 +37,36 @@ export interface Translations {
   holdDeadband: string; holdDwell: string
   protectionActiveMsg: string; tempOnlyFallback: string; waitingForUnit: string
   reasonLabels: { temp: string; cooling: string; dehumidify: string; muggy: string; manual: string; schedule: string; reboot: string }
+  // Home OS chrome + strings that used to be hard-coded English
+  locale: string; appTitle: string; connected: string; disconnected: string; loading: string; simulation: string
+  levelTitle: string; relative: string; volumeFlow: string; resumeSchedule: string; followsSchedule: string; manualOverride: string
+  ventOffResumes: string; unit: string; filterChange: string; open: string; closed: string; stale: string; outdoor: string; indoor: string
+  everyDay: string; noDays: string; clickToAdd: string; rightClickOptions: string
+  invalidRange: string; selectDay: string; enabled: string; timeRange: string; formatsHint: string; daysLabel: string
+  on: string; off: string; freeCoolingHint: string; enableSummer: string; months: readonly string[]
+  savedReboot: string; displayLanguage: string; displayLanguageHint: string; backupHint: string; restoreFailed: string
+  version: string; uptime: string; freeHeap: string; network: string; ethernet: string; updateFailed: string
+  oledDisplay: string; displayNA: string; left: string; press: string; right: string; loginTitle: string
   reasonText: { temp: string; cooling: string; dehumidify: string; muggy: string; manual: string; schedule: string; reboot: string }
 }
 
 const en: Translations = {
+  locale: 'en-GB', appTitle: 'Ventilation', connected: 'Connected', disconnected: 'Disconnected', loading: 'Loading…', simulation: 'Simulation mode',
+  levelTitle: 'Ventilation level', relative: 'Relative', volumeFlow: 'Air flow', resumeSchedule: 'Resume schedule',
+  followsSchedule: 'Schedule', manualOverride: 'Manual',
+  ventOffResumes: 'Ventilation off — resumes in {t}', unit: 'Unit', filterChange: 'Change filter', open: 'Open', closed: 'Closed',
+  stale: 'stale', outdoor: 'Outdoor', indoor: 'Indoor',
+  everyDay: 'Every day', noDays: 'No days', clickToAdd: 'Click to add', rightClickOptions: 'Right-click for options',
+  invalidRange: 'Invalid time range. Use e.g. 8:00 - 22:00', selectDay: 'Select at least one day', enabled: 'Enabled',
+  timeRange: 'Time range', formatsHint: 'Formats: 8-22, 08:00-22:00, 8:00 - 13:30', daysLabel: 'Days',
+  on: 'On', off: 'Off', freeCoolingHint: 'Free cooling — outdoor air bypasses the heat exchanger. Enable during warm months.',
+  enableSummer: 'Enable summer mode schedule',
+  months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+  savedReboot: 'Saved. Reboot to apply network changes.', displayLanguage: 'Display language',
+  displayLanguageHint: 'Language of the OLED display on the unit. The web UI language is chosen in the header.',
+  backupHint: 'Export or import all settings and schedules as a JSON file.', restoreFailed: 'Failed to restore backup',
+  version: 'Version', uptime: 'Uptime', freeHeap: 'Free heap', network: 'Network', ethernet: 'Ethernet', updateFailed: 'Update failed',
+  oledDisplay: 'OLED display', displayNA: 'Display not available', left: 'Left', press: 'Press', right: 'Right', loginTitle: 'Sign in',
   // Tabs
   status: 'Status',
   schedules: 'Schedules',
@@ -61,7 +87,7 @@ const en: Translations = {
   // Schedule
   ventilationSchedules: 'Ventilation Schedules',
   weeklyOverview: 'Weekly Overview',
-  weeklyOverviewHint: '— click gaps to add, right-click segments for options, drag borders',
+  weeklyOverviewHint: 'Click gaps to add, right-click segments for options, drag borders',
   noProgram: 'No program',
   schedule: 'Schedule',
   level: 'Level',
@@ -87,14 +113,14 @@ const en: Translations = {
   bypassTo: 'to',
 
   // Settings
-  wifi: 'WiFi',
+  wifi: 'WLAN',
   ssid: 'SSID',
   mqtt: 'MQTT',
   server: 'Server',
   port: 'Port',
   topic: 'Topic',
   authEnabled: 'Authentication',
-  webUi: 'Web UI',
+  webUi: 'Weboberfläche',
   requireLogin: 'Require login',
   noLoginWarning: 'Login is disabled — anyone who can reach this device on the network can read and change all settings.',
   saveSettings: 'Save Settings',
@@ -140,7 +166,7 @@ const en: Translations = {
     'Incoming air cooler than indoor (−1.0 to 0 °C)',
     'Incoming air much cooler than indoor (Δ < −1.0 °C)',
   ],
-  tempHistory: 'Temperature History (24h)',
+  tempHistory: 'History (24 h)',
   levelChanges: 'Level changes',
   noHistoryYet: 'Collecting data…',
   legendMeasurements: 'Measurements',
@@ -185,11 +211,27 @@ const en: Translations = {
 }
 
 const de: Translations = {
+  locale: 'de-DE', appTitle: 'Lüftung', connected: 'Verbunden', disconnected: 'Getrennt', loading: 'Lädt …', simulation: 'Simulationsmodus',
+  levelTitle: 'Lüftungsstufe', relative: 'Relativ', volumeFlow: 'Volumenstrom', resumeSchedule: 'Zurück zum Zeitplan',
+  followsSchedule: 'Zeitplan', manualOverride: 'Manuell',
+  ventOffResumes: 'Lüftung aus — läuft wieder in {t}', unit: 'Gerät', filterChange: 'Filterwechsel', open: 'Offen', closed: 'Geschlossen',
+  stale: 'veraltet', outdoor: 'Außen', indoor: 'Innen',
+  everyDay: 'Täglich', noDays: 'Keine Tage', clickToAdd: 'Klicken zum Hinzufügen', rightClickOptions: 'Rechtsklick für Optionen',
+  invalidRange: 'Ungültiger Zeitraum, z. B. 8:00 - 22:00', selectDay: 'Mindestens einen Tag wählen', enabled: 'Aktiv',
+  timeRange: 'Zeitraum', formatsHint: 'Formate: 8-22, 08:00-22:00, 8:00 - 13:30', daysLabel: 'Tage',
+  on: 'An', off: 'Aus', freeCoolingHint: 'Freie Kühlung — die Außenluft umgeht den Wärmetauscher. In den warmen Monaten einschalten.',
+  enableSummer: 'Sommermodus-Zeitraum aktivieren',
+  months: ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'],
+  savedReboot: 'Gespeichert. Netzwerkänderungen gelten nach einem Neustart.', displayLanguage: 'Displaysprache',
+  displayLanguageHint: 'Sprache des OLED-Displays am Gerät. Die Sprache der Weboberfläche wählst du oben rechts.',
+  backupHint: 'Alle Einstellungen und Zeitpläne als JSON-Datei exportieren oder importieren.', restoreFailed: 'Wiederherstellen fehlgeschlagen',
+  version: 'Version', uptime: 'Laufzeit', freeHeap: 'Freier Speicher', network: 'Netzwerk', ethernet: 'Ethernet', updateFailed: 'Update fehlgeschlagen',
+  oledDisplay: 'OLED-Display', displayNA: 'Display nicht verfügbar', left: 'Links', press: 'Drücken', right: 'Rechts', loginTitle: 'Anmelden',
   status: 'Status',
   schedules: 'Zeitpläne',
   settings: 'Einstellungen',
   system: 'System',
-  debug: 'Debug',
+  debug: 'Diagnose',
 
   levels: ['Aus', 'Reduziert', 'Normal', 'Party'],
   days: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
@@ -199,12 +241,12 @@ const de: Translations = {
   password: 'Passwort',
   invalidCredentials: 'Ungültige Anmeldedaten',
 
-  ventilationSchedules: 'Lüftungs-Zeitpläne',
+  ventilationSchedules: 'Lüftungszeitpläne',
   weeklyOverview: 'Wochenübersicht',
-  weeklyOverviewHint: '— Lücken klicken zum Hinzufügen, Rechtsklick für Optionen, Ränder ziehen',
+  weeklyOverviewHint: 'Lücke klicken zum Hinzufügen, Rechtsklick für Optionen, Ränder ziehen',
   noProgram: 'Kein Programm',
   schedule: 'Zeitplan',
-  level: 'Stufe',
+  level: 'Lüftungsstufe',
   time: 'Zeit',
   from: 'Von',
   to: 'bis',
@@ -225,14 +267,14 @@ const de: Translations = {
   bypassFrom: 'Von',
   bypassTo: 'bis',
 
-  wifi: 'WiFi',
+  wifi: 'WLAN',
   ssid: 'SSID',
   mqtt: 'MQTT',
   server: 'Server',
   port: 'Port',
   topic: 'Topic',
   authEnabled: 'Authentifizierung',
-  webUi: 'Web UI',
+  webUi: 'Weboberfläche',
   requireLogin: 'Anmeldung erforderlich',
   noLoginWarning: 'Die Anmeldung ist deaktiviert — jeder, der dieses Gerät im Netzwerk erreicht, kann alle Einstellungen lesen und ändern.',
   saveSettings: 'Einstellungen speichern',
@@ -240,21 +282,21 @@ const de: Translations = {
   english: 'English',
   german: 'Deutsch',
 
-  backupRestore: 'Sicherung & Wiederherstellung',
-  exportBackup: 'Backup exportieren',
-  importBackup: 'Backup importieren',
-  backupRestored: 'Backup wiederhergestellt. Neustart für Netzwerkänderungen.',
+  backupRestore: 'Sicherung',
+  exportBackup: 'Sicherung exportieren',
+  importBackup: 'Sicherung importieren',
+  backupRestored: 'Sicherung wiederhergestellt. Netzwerkänderungen gelten nach einem Neustart.',
 
-  systemInfo: 'Systeminformation',
+  systemInfo: 'Systeminformationen',
   firmwareUpdate: 'Firmware-Update',
   uploadFirmware: 'Firmware hochladen',
-  uploading: 'Hochladen...',
-  updateSuccessful: 'Update erfolgreich. Neustart...',
+  uploading: 'Wird hochgeladen …',
+  updateSuccessful: 'Update erfolgreich. Gerät startet neu …',
 
   ventilation: 'Lüftung',
   override: 'Manuell',
-  timedOff: 'Zeitweise aus',
-  cancelOff: 'Aus beenden',
+  timedOff: 'Vorübergehend aus',
+  cancelOff: 'Wieder einschalten',
   resumesIn: 'Weiter in',
   current: 'Aktuell',
   temperatures: 'Temperaturen',
@@ -275,9 +317,9 @@ const de: Translations = {
     'Zuluft kühler als innen (−1,0 bis 0 °C)',
     'Zuluft viel kühler als innen (Δ < −1,0 °C)',
   ],
-  tempHistory: 'Temperaturverlauf (24h)',
+  tempHistory: 'Verlauf (24 h)',
   levelChanges: 'Stufenwechsel',
-  noHistoryYet: 'Sammle Daten…',
+  noHistoryYet: 'Daten werden gesammelt …',
   legendMeasurements: 'Messwerte',
   legendReason: 'Auslöser',
   legendBypass: 'Bypass',
@@ -287,23 +329,23 @@ const de: Translations = {
   climateDecision: 'Klima-Entscheidung',
   activeRule: 'Aktive Regel',
   humiditySensors: 'Feuchtesensoren',
-  humiditySensorsHint: 'MQTT-Topics mit JSON-Feldern humidity / temperature / pressure. Genutzt von Extremhitze-Modus (energiebasierte Kühlung) und Feuchteschutz.',
+  humiditySensorsHint: 'MQTT-Topics mit JSON-Feldern humidity / temperature / pressure. Genutzt vom Extremhitze-Modus (energiebasierte Kühlung) und vom Feuchteschutz.',
   moistureProtection: 'Feuchteschutz (ganzjährig)',
   outdoorSensorTopics: 'Außensensor-Topics',
   outdoorSensorTopicsHint: 'Mehrere möglich — die Entscheidung nutzt die niedrigste Temperatur und höchste Feuchte daraus.',
   addOutdoorSensor: '+ Außensensor hinzufügen',
   indoorSensorTopics: 'Innensensor-Topics',
   addIndoorSensor: '+ Innensensor hinzufügen',
-  indoorRh: 'Innen rel. F.',
-  outdoorRh: 'Außen rel. F.',
-  indoorEnthalpy: 'Innen h',
-  outdoorEnthalpy: 'Außen h',
+  indoorRh: 'Feuchte innen',
+  outdoorRh: 'Feuchte außen',
+  indoorEnthalpy: 'Enthalpie innen',
+  outdoorEnthalpy: 'Enthalpie außen',
   ambientPressure: 'Luftdruck',
   indoorAir: 'Innen (T / rF / AF / h)',
   outdoorAir: 'Außen (T / rF / AF / h)',
   aggregateHint: 'Je Seite: niedrigste Temperatur und höchste rF; AF/Enthalpie stammen vom feuchtesten Sensor, umgerechnet auf diese Temperatur — die Werte können also von verschiedenen Sensoren kommen und müssen sich nicht zu einem Zustand zusammenfügen.',
   holdDeadband: 'Wird gehalten — Außen- und Innenenergie liegen im neutralen Band (Δh {dh} kJ/kg); kein Umschalten auf Sensorrauschen.',
-  holdDwell: 'Würde in {time} auf {level} wechseln (Dwell).',
+  holdDwell: 'Wechselt in {time} auf {level} (Haltezeit).',
   protectionActiveMsg: 'Feuchteschutz lüftet aktiv.',
   tempOnlyFallback: 'Nur Temperatur — Feuchtedaten fehlen oder sind veraltet.',
   waitingForUnit: 'Warte auf die Lüftungsanlage — die Klima-Entscheidung startet, sobald sie verbunden ist.',
@@ -322,5 +364,24 @@ const de: Translations = {
 const translations: Record<Lang, Translations> = { en, de }
 
 export function t(lang: Lang): Translations {
-  return translations[lang] ?? translations.en
+  return translations[lang] ?? translations.de
+}
+
+// UI language: per browser, shared with the other house apps. German default.
+const LANG_KEY = 'home.lang'
+export function initialLang(): Lang {
+  try {
+    const v = localStorage.getItem(LANG_KEY)
+    if (v === 'de' || v === 'en') return v
+  } catch { /* storage blocked */ }
+  return 'de'
+}
+export function storeLang(l: Lang) {
+  try { localStorage.setItem(LANG_KEY, l) } catch { /* storage blocked */ }
+}
+
+/** Fixed-decimal number in the UI language (decimal comma in German). */
+export function fx(lang: Lang, v: number, d = 1): string {
+  const s = v.toFixed(d)
+  return lang === 'de' ? s.replace('.', ',') : s
 }

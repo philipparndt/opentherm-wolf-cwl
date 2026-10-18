@@ -1,25 +1,25 @@
 import { useState, useEffect } from 'preact/hooks'
 import { getHistory, type History, type HistoryBucket } from './api'
-import { t, type Lang } from './translations'
+import { t, fx, type Lang } from './translations'
 
 // Off / Reduced / Normal / Party — same order & colours as the rest of the UI.
-const LEVEL_COLORS = ['var(--accent-red)', 'var(--accent-orange)', 'var(--accent-blue)', 'var(--accent-green)'] as const
+const LEVEL_COLORS = ['var(--lvl-0)', 'var(--lvl-1)', 'var(--lvl-2)', 'var(--lvl-3)'] as const
 
 // Marker dot colour by the reason the level changed.
 const REASON_COLORS: Record<string, string> = {
-  temp: 'var(--accent-blue)',
-  cooling: 'var(--accent-green)',
+  temp: 'var(--info)',
+  cooling: 'var(--ok)',
   dehumidify: '#22c3c3',
-  muggy: 'var(--accent-orange)',
-  manual: 'var(--text-muted)',
+  muggy: 'var(--warn)',
+  manual: 'var(--ink-3)',
   schedule: '#a78bfa',
-  reboot: '#e2e8f0',
+  reboot: 'var(--ink-2)',
 }
 
 // Series colours. Temperature on the left axis, humidity + enthalpy on their own
 // right-hand axes — each pair distinct so the busier chart stays readable.
-const COL_SUPPLY = 'var(--accent-orange)'
-const COL_EXHAUST = 'var(--accent-blue)'
+const COL_SUPPLY = 'var(--warn)'
+const COL_EXHAUST = 'var(--info)'
 const COL_INDOOR_HUM = '#22c3c3'
 const COL_OUTDOOR_HUM = '#a78bfa'
 const COL_INDOOR_ENTH = '#f43f5e'
@@ -31,7 +31,7 @@ const W = 640, H = 232
 const PAD_L = 38, PAD_T = 26, PAD_B = 36
 // Right gutters reserved for the humidity (%) and enthalpy (kJ/kg) axes when
 // each is shown, so their labels don't get clipped at the SVG edge.
-const PAD_R_BASE = 12, HUM_GUTTER = 20, ENTH_GUTTER = 34
+const PAD_R_BASE = 12, HUM_GUTTER = 26, ENTH_GUTTER = 34
 const PLOT_H = H - PAD_T - PAD_B
 // Bypass state strip: a thin solid bar just below the plot. A separate lane
 // reads far clearer than tinting the plot background (open vs closed tints were
@@ -41,7 +41,7 @@ const BYPASS_Y = PAD_T + PLOT_H + 8
 
 // Shared style for the legend section headers (Measurements / Level changes /
 // Change reason / Bypass) so they line up consistently.
-const LEGEND_TITLE = 'font-size:0.72em;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);opacity:0.75;margin:10px 0 3px'
+const LEGEND_TITLE = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);margin:12px 0 4px'
 
 const mid = (b: HistoryBucket) => (b[0] + b[1]) / 2 // (min + max) / 2
 
@@ -165,7 +165,7 @@ export function TimelineChart({ lang }: { lang: Lang }) {
     return (
       <div class="card">
         <h3>{t(lang).tempHistory}</h3>
-        <p style="color:var(--text-muted);font-size:0.85em">{t(lang).noHistoryYet}</p>
+        <p style="color:var(--ink-3);font-size:0.85em">{t(lang).noHistoryYet}</p>
       </div>
     )
   }
@@ -270,7 +270,7 @@ export function TimelineChart({ lang }: { lang: Lang }) {
     if (i < 0) return
     const v = mid(series[i]!)
     curMarkers.push({ x: xf(i), y: yf(v), color })
-    valueLines.push({ text: `${label}: ${v.toFixed(1)}${unit}`, color })
+    valueLines.push({ text: `${label}: ${fx(lang, v)}${unit}`, color })
   }
   pushCur(vis.supply, hist.supply, x, y, COL_SUPPLY, tr.supply, '°')
   pushCur(vis.exhaust, hist.exhaust, x, y, COL_EXHAUST, tr.exhaust, '°')
@@ -306,7 +306,7 @@ export function TimelineChart({ lang }: { lang: Lang }) {
       if (!show) return
       const v = sampleAt(frac, n, series)
       if (v == null) return
-      lines.push({ text: `${label}: ${v.toFixed(1)}${unit}`, color })
+      lines.push({ text: `${label}: ${fx(lang, v)}${unit}`, color })
       pts.push({ y: yf(v), color })
     }
     add(vis.supply, hist.supply, slots, y, COL_SUPPLY, tr.supply, '°')
@@ -342,22 +342,22 @@ export function TimelineChart({ lang }: { lang: Lang }) {
         {/* gridlines + temperature labels */}
         {ticks.map((tv) => (
           <g>
-            <line x1={PAD_L} y1={y(tv)} x2={xR} y2={y(tv)} stroke="var(--border-color)" stroke-width="1" />
-            <text x={PAD_L - 5} y={y(tv) + 3} text-anchor="end" font-size="10" fill="var(--text-muted)">{tv.toFixed(0)}°</text>
+            <line x1={PAD_L} y1={y(tv)} x2={xR} y2={y(tv)} stroke="var(--line-2)" stroke-width="1" />
+            <text x={PAD_L - 5} y={y(tv) + 3} text-anchor="end" font-size="10" fill="var(--ink-3)">{tv.toFixed(0)}°</text>
           </g>
         ))}
 
         {/* right humidity axis (0–100 %) */}
         {humVisible && [0, 50, 100].map((hv) => (
-          <text x={humLabelX} y={yH(hv) + 3} text-anchor="start" font-size="10" fill="var(--text-muted)">{hv}</text>
+          <text x={humLabelX} y={yH(hv) + 3} text-anchor="start" font-size="10" fill="var(--ink-3)">{hv}</text>
         ))}
 
         {/* outer enthalpy axis (auto-scaled kJ/kg) */}
         {enthVisible && (
           <>
-            <text x={enthLabelX} y={PAD_T - 12} text-anchor="start" font-size="9" fill="var(--text-muted)">kJ/kg</text>
+            <text x={enthLabelX} y={PAD_T - 12} text-anchor="start" font-size="9" fill="var(--ink-3)">kJ/kg</text>
             {enthTicks.map((ev) => (
-              <text x={enthLabelX} y={yE(ev) + 3} text-anchor="start" font-size="10" fill="var(--text-muted)">{ev.toFixed(0)}</text>
+              <text x={enthLabelX} y={yE(ev) + 3} text-anchor="start" font-size="10" fill="var(--ink-3)">{ev.toFixed(0)}</text>
             ))}
           </>
         )}
@@ -375,8 +375,8 @@ export function TimelineChart({ lang }: { lang: Lang }) {
             layer below so it stays above the scrubbing overlay. */}
         {vis.markers && hist.events.map((ev) => {
           const ex = eventX(ev.epoch)
-          const rc = REASON_COLORS[ev.reason] ?? 'var(--text-muted)'
-          const lc = LEVEL_COLORS[ev.level] ?? 'var(--text-muted)'
+          const rc = REASON_COLORS[ev.reason] ?? 'var(--ink-3)'
+          const lc = LEVEL_COLORS[ev.level] ?? 'var(--ink-3)'
           const reboot = ev.reason === 'reboot'
           return (
             <g pointer-events="none">
@@ -392,16 +392,16 @@ export function TimelineChart({ lang }: { lang: Lang }) {
 
         {/* current-point markers — the latest reading of each visible series */}
         {curMarkers.map((m) => (
-          <circle cx={m.x} cy={m.y} r="3.5" fill={m.color} stroke="var(--bg-secondary)" stroke-width="1.5" pointer-events="none" />
+          <circle cx={m.x} cy={m.y} r="3.5" fill={m.color} stroke="var(--surface)" stroke-width="1.5" pointer-events="none" />
         ))}
 
         {/* scrubbing crosshair — a vertical line at the hovered time with a dot
             where it crosses each visible curve (visual only, no pointer events) */}
         {cursor && (
           <g pointer-events="none">
-            <line x1={cursor.x} y1={PAD_T} x2={cursor.x} y2={PAD_T + PLOT_H} stroke="var(--text-secondary)" stroke-width="1" stroke-dasharray="3,3" opacity="0.8" />
+            <line x1={cursor.x} y1={PAD_T} x2={cursor.x} y2={PAD_T + PLOT_H} stroke="var(--ink-2)" stroke-width="1" stroke-dasharray="3,3" opacity="0.8" />
             {cursor.pts.map((p) => (
-              <circle cx={cursor.x} cy={p.y} r="3" fill={p.color} stroke="var(--bg-secondary)" stroke-width="1.5" />
+              <circle cx={cursor.x} cy={p.y} r="3" fill={p.color} stroke="var(--surface)" stroke-width="1.5" />
             ))}
           </g>
         )}
@@ -425,7 +425,7 @@ export function TimelineChart({ lang }: { lang: Lang }) {
               )
             })}
             <rect x={PAD_L} y={BYPASS_Y} width={PLOT_W} height={BYPASS_H} rx="1.5"
-                  fill="none" stroke="var(--border-color)" stroke-width="1" pointer-events="none" />
+                  fill="none" stroke="var(--line-2)" stroke-width="1" pointer-events="none" />
           </g>
         )}
 
@@ -443,8 +443,8 @@ export function TimelineChart({ lang }: { lang: Lang }) {
             at the marker's time, with the crosshair anchored on the marker. */}
         {vis.markers && hist.events.map((ev) => {
           const ex = eventX(ev.epoch)
-          const rc = REASON_COLORS[ev.reason] ?? 'var(--text-muted)'
-          const lc = LEVEL_COLORS[ev.level] ?? 'var(--text-muted)'
+          const rc = REASON_COLORS[ev.reason] ?? 'var(--ink-3)'
+          const lc = LEVEL_COLORS[ev.level] ?? 'var(--ink-3)'
           const reboot = ev.reason === 'reboot'
           const desc = reboot
             ? (reasonLabels.reboot ?? 'Reboot')
@@ -468,8 +468,8 @@ export function TimelineChart({ lang }: { lang: Lang }) {
         ))}
 
         {/* time axis labels */}
-        <text x={PAD_L} y={H - 6} text-anchor="start" font-size="10" fill="var(--text-muted)">-{windowHours}h</text>
-        <text x={xR} y={H - 6} text-anchor="end" font-size="10" fill="var(--text-muted)">{tr.now.toLowerCase()}</text>
+        <text x={PAD_L} y={H - 6} text-anchor="start" font-size="10" fill="var(--ink-3)">-{windowHours}h</text>
+        <text x={xR} y={H - 6} text-anchor="end" font-size="10" fill="var(--ink-3)">{tr.now.toLowerCase()}</text>
       </svg>
 
       {/* hover tooltip — anchored above the point, flipped below near the top edge */}
@@ -493,8 +493,8 @@ export function TimelineChart({ lang }: { lang: Lang }) {
       })()}
 
       {/* legend — each entry doubles as a show/hide toggle */}
-      <div style={LEGEND_TITLE}>{tr.legendMeasurements}:</div>
-      <div style="display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:0.8em;color:var(--text-muted)">
+      <div style={LEGEND_TITLE}>{tr.legendMeasurements}</div>
+      <div style="display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:0.8em;color:var(--ink-3)">
         <LegendToggle on={vis.supply} onToggle={() => toggle('supply')}><span style={swatchLine(COL_SUPPLY)} />{tr.supply}</LegendToggle>
         <LegendToggle on={vis.exhaust} onToggle={() => toggle('exhaust')}><span style={swatchLine(COL_EXHAUST)} />{tr.exhaust}</LegendToggle>
         {hasHumidity && <LegendToggle on={vis.indoorHum} onToggle={() => toggle('indoorHum')}><span style={swatchLine(COL_INDOOR_HUM, true)} />{tr.indoorRh}</LegendToggle>}
@@ -504,13 +504,13 @@ export function TimelineChart({ lang }: { lang: Lang }) {
       </div>
       {bypassSpans.length > 0 && (
         <>
-          <div style={LEGEND_TITLE}>{tr.legendBypass}:</div>
-          <div style="display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:0.8em;color:var(--text-muted)">
+          <div style={LEGEND_TITLE}>{tr.legendBypass}</div>
+          <div style="display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:0.8em;color:var(--ink-3)">
             <LegendToggle on={vis.bypass} onToggle={() => toggle('bypass')}>
-              <span style="display:inline-block;width:14px;height:10px;background:var(--chart-bypass-open);border:1px solid var(--border-color);vertical-align:middle;margin-right:4px" />{tr.bypassOpen}
+              <span style="display:inline-block;width:14px;height:10px;background:var(--chart-bypass-open);border:1px solid var(--line-2);vertical-align:middle;margin-right:4px" />{tr.bypassOpen}
             </LegendToggle>
             <LegendToggle on={vis.bypass} onToggle={() => toggle('bypass')}>
-              <span style="display:inline-block;width:14px;height:10px;background:var(--chart-bypass-closed);border:1px solid var(--border-color);vertical-align:middle;margin-right:4px" />{tr.bypassClosed}
+              <span style="display:inline-block;width:14px;height:10px;background:var(--chart-bypass-closed);border:1px solid var(--line-2);vertical-align:middle;margin-right:4px" />{tr.bypassClosed}
             </LegendToggle>
           </div>
         </>
@@ -519,19 +519,19 @@ export function TimelineChart({ lang }: { lang: Lang }) {
         <>
           {/* level swatches (dashed) and reason markers (dots) never interleave;
               the whole overlay toggles via its section entries */}
-          <div style={LEGEND_TITLE}>{tr.levelChanges}:</div>
-          <div style="display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:0.78em;color:var(--text-muted)">
+          <div style={LEGEND_TITLE}>{tr.levelChanges}</div>
+          <div style="display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:0.78em;color:var(--ink-3)">
             {levels.map((name, i) => (
               <LegendToggle on={vis.markers} onToggle={() => toggle('markers')}>
                 <span style={`display:inline-block;width:10px;height:0;border-top:2px dashed ${LEVEL_COLORS[i]};vertical-align:middle;margin-right:4px`} />{name}
               </LegendToggle>
             ))}
           </div>
-          <div style={LEGEND_TITLE}>{tr.legendReason}:</div>
-          <div style="display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:0.78em;color:var(--text-muted)">
+          <div style={LEGEND_TITLE}>{tr.legendReason}</div>
+          <div style="display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:0.78em;color:var(--ink-3)">
             {[...new Set(hist.events.map((e) => e.reason))].map((r) => (
               <LegendToggle on={vis.markers} onToggle={() => toggle('markers')}>
-                <span style={`display:inline-block;width:8px;height:8px;border-radius:50%;background:${REASON_COLORS[r] ?? 'var(--text-muted)'};vertical-align:middle;margin-right:4px`} />{reasonLabels[r] ?? r}
+                <span style={`display:inline-block;width:8px;height:8px;border-radius:50%;background:${REASON_COLORS[r] ?? 'var(--ink-3)'};vertical-align:middle;margin-right:4px`} />{reasonLabels[r] ?? r}
               </LegendToggle>
             ))}
           </div>

@@ -1,0 +1,7 @@
+# Supply chain: never resolve a version that has been public for less than a
+# week (value in minutes).
+minimumReleaseAge: 10080
+
+# pnpm 11 blocks dependency build scripts by default; allow esbuild's.
+allowBuilds:
+  esbuild: true

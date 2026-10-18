@@ -13,7 +13,7 @@ const OFF_Y = BORDER * SCALE
 // Background color (dark, matches OLED bezel)
 const BG_R = 5, BG_G = 6, BG_B = 10
 
-export function OledMirror() {
+export function OledMirror({ title, na }: { title: string; na: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [error, setError] = useState(false)
 
@@ -88,15 +88,15 @@ export function OledMirror() {
   }, [])
 
   return (
-    <div class="card" style="padding:12px;text-align:center">
-      <h3>OLED Display</h3>
+    <div class="card" style="text-align:center">
+      <h3>{title}</h3>
       <canvas
         ref={canvasRef}
         width={CANVAS_W}
         height={CANVAS_H}
         style="border-radius:6px;image-rendering:pixelated;max-width:100%;height:auto"
       />
-      {error && <div style="color:var(--text-muted);font-size:0.8em;margin-top:4px">Display not available</div>}
+      {error && <p class="hint">{na}</p>}
     </div>
   )
 }

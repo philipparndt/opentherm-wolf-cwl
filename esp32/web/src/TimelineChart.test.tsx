@@ -44,7 +44,7 @@ describe('TimelineChart current-point markers', () => {
     const { container } = await renderChart(makeHistory())
     // Visible current markers carry the contrasting ring (stroke=--bg-secondary):
     // supply, exhaust, indoor RH, outdoor RH = 4.
-    const markers = container.querySelectorAll('circle[stroke="var(--bg-secondary)"]')
+    const markers = container.querySelectorAll('circle[stroke="var(--surface)"]')
     expect(markers.length).toBe(4)
   })
 
@@ -104,7 +104,7 @@ describe('TimelineChart hover tooltips', () => {
     const swatches = styles.filter((s) => s.includes('border-radius'))
     // One swatch per value line; supply's swatch uses the supply accent colour.
     expect(swatches.length).toBeGreaterThan(0)
-    expect(swatches.some((c) => c.includes('var(--accent-orange)'))).toBe(true)
+    expect(swatches.some((c) => c.includes('var(--warn)'))).toBe(true)
   })
 
   it('explains a bypass span on hover', async () => {
@@ -135,7 +135,7 @@ describe('TimelineChart enthalpy + toggles', () => {
   it('draws enthalpy curves with their own current markers and value lines', async () => {
     const { container } = await renderChart(withEnthalpy(makeHistory()))
     // supply, exhaust, indoor RH, outdoor RH, indoor h, outdoor h = 6 markers.
-    const markers = container.querySelectorAll('circle[stroke="var(--bg-secondary)"]')
+    const markers = container.querySelectorAll('circle[stroke="var(--surface)"]')
     expect(markers.length).toBe(6)
     const hit = container.querySelector('circle.chart-hit')!
     fireEvent.mouseEnter(hit, { clientX: 200, clientY: 120 })
@@ -146,17 +146,17 @@ describe('TimelineChart enthalpy + toggles', () => {
 
   it('hides a series when its legend entry is toggled off and persists the choice', async () => {
     const { container, getByText, unmount } = await renderChart(withEnthalpy(makeHistory()))
-    expect(container.querySelectorAll('circle[stroke="var(--bg-secondary)"]').length).toBe(6)
+    expect(container.querySelectorAll('circle[stroke="var(--surface)"]').length).toBe(6)
 
     fireEvent.click(getByText('Supply').closest('.legend-toggle')!)
     // Supply curve + its current marker are gone → 5 markers.
-    expect(container.querySelectorAll('circle[stroke="var(--bg-secondary)"]').length).toBe(5)
+    expect(container.querySelectorAll('circle[stroke="var(--surface)"]').length).toBe(5)
     expect(JSON.parse(localStorage.getItem('wolf-cwl.timeline-visibility')!).supply).toBe(false)
 
     // Remount reads the persisted selection: supply stays hidden.
     unmount()
     const again = await renderChart(withEnthalpy(makeHistory()))
-    expect(again.container.querySelectorAll('circle[stroke="var(--bg-secondary)"]').length).toBe(5)
+    expect(again.container.querySelectorAll('circle[stroke="var(--surface)"]').length).toBe(5)
   })
 
   it('defaults an unknown stored series to visible', async () => {
@@ -164,7 +164,7 @@ describe('TimelineChart enthalpy + toggles', () => {
     localStorage.setItem('wolf-cwl.timeline-visibility', JSON.stringify({ exhaust: false }))
     const { container } = await renderChart(withEnthalpy(makeHistory()))
     // exhaust hidden → 5 of the 6 markers remain.
-    expect(container.querySelectorAll('circle[stroke="var(--bg-secondary)"]').length).toBe(5)
+    expect(container.querySelectorAll('circle[stroke="var(--surface)"]').length).toBe(5)
   })
 })
 
@@ -192,7 +192,7 @@ describe('TimelineChart scrubbing crosshair', () => {
     expect(tip.textContent).toContain('Outdoor h: 35.0 kJ/kg')
 
     // The vertical crosshair line (text-secondary) plus a dot per visible curve.
-    const crosshair = container.querySelector('line[stroke="var(--text-secondary)"]')
+    const crosshair = container.querySelector('line[stroke="var(--ink-2)"]')
     expect(crosshair).not.toBeNull()
   })
 
@@ -223,6 +223,6 @@ describe('TimelineChart scrubbing crosshair', () => {
     expect(container.querySelector('.chart-tooltip')).not.toBeNull()
     fireEvent.mouseLeave(overlay)
     expect(container.querySelector('.chart-tooltip')).toBeNull()
-    expect(container.querySelector('line[stroke="var(--text-secondary)"]')).toBeNull()
+    expect(container.querySelector('line[stroke="var(--ink-2)"]')).toBeNull()
   })
 })

@@ -107,33 +107,33 @@ fn cache_control(path: &str) -> &'static str {
 }
 
 fn serve_file(req: esp_idf_svc::http::server::Request<&mut EspHttpConnection>, path: &str) -> HandlerResult {
-    match std::fs::read(path) {
-        Ok(data) => {
-            let ct = content_type(path);
-            let mut resp = req.into_response(200, None, &[
-                ("Content-Type", ct),
-                ("Cache-Control", cache_control(path)),
-            ])?;
-            resp.write_all(&data)?;
-            Ok(())
-        }
-        Err(_) => {
-            // SPA fallback: try index.html
-            if path != "/www/index.html" {
-                if let Ok(data) = std::fs::read("/www/index.html") {
-                    let mut resp = req.into_response(200, None, &[
-                        ("Content-Type", "text/html"),
-                        ("Cache-Control", "no-cache"),
-                    ])?;
-                    resp.write_all(&data)?;
-                    return Ok(());
-                }
+    // Stream from SPIFFS in small chunks instead of std::fs::read: the web
+    // bundle (app.js ~70 KB) would otherwise need one contiguous heap block of
+    // its full size, and free heap on this board is only ~90 KB.
+    let (mut file, ct, cc) = match std::fs::File::open(path) {
+        Ok(f) => (f, content_type(path), cache_control(path)),
+        // SPA fallback: try index.html
+        Err(_) => match std::fs::File::open("/www/index.html") {
+            Ok(f) if path != "/www/index.html" => (f, "text/html", "no-cache"),
+            _ => {
+                let mut resp = req.into_response(404, None, &[("Content-Type", "text/plain")])?;
+                resp.write_all(b"Not found")?;
+                return Ok(());
             }
-            let mut resp = req.into_response(404, None, &[("Content-Type", "text/plain")])?;
-            resp.write_all(b"Not found")?;
-            Ok(())
+        },
+    };
+    let mut resp = req.into_response(200, None, &[
+        ("Content-Type", ct),
+        ("Cache-Control", cc),
+    ])?;
+    let mut buf = vec![0u8; 2048];
+    loop {
+        match std::io::Read::read(&mut file, &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => resp.write_all(&buf[..n])?,
         }
     }
+    Ok(())
 }
 
 pub fn start_server(state: AppState) -> Result<EspHttpServer<'static>, EspIOError> {
