@@ -1,57 +1,23 @@
-/* Home OS design (v2), tokens copied from home-portal. No web fonts: the ESP32
-   serves only app.js / style.css / index.html, so this uses the system stack.
-   Dark mode: html.dark + data-theme=dark, set in index.html before first paint. */
+/* Home OS tokens and the Wall Display embed mode from @mqtt-home/ui. Only
+   tokens.css and embed.css: the ESP32 serves only app.js / style.css /
+   index.html, so no web fonts (the system stack below) and its own components.
+   Dark mode: html.dark + data-theme=dark, set before first paint by the
+   prepaint script (vite.config.ts). */
+@import "@mqtt-home/ui/tokens.css";
+@import "@mqtt-home/ui/embed.css";
+
+/* this page's own tokens */
 :root {
-  color-scheme: light;
-  --canvas: #F4F6F8; --surface: #FFFFFF; --surface-2: #F8FAFB; --sunken: #EDF0F3;
-  --line: rgba(15, 23, 42, .075); --line-2: rgba(15, 23, 42, .13);
-  --highlight: inset 0 1px 0 rgba(255, 255, 255, 1), inset 0 -1px 0 rgba(14, 32, 52, .025);
-  --ink: #0B1220; --ink-2: #384152; --ink-3: #687083; --ink-4: #9AA2B1;
-  --accent: #0E9F8E; --accent-ink: #06786B; --accent-soft: rgba(14, 159, 142, .10); --focus: rgba(14, 159, 142, .35);
-  --ok: #0B9B6A; --ok-soft: rgba(11, 155, 106, .10);
-  --warn: #C77700; --warn-soft: rgba(232, 145, 10, .12);
-  --alert: #E0264B; --alert-soft: rgba(224, 38, 75, .09);
-  --info: #1C7ED6; --info-soft: rgba(28, 126, 214, .10);
-  --idle: #7A8496;
   --violet: #7C5CFA;
-  --elevation-1: 0 1px 2px rgba(14, 32, 52, .06), 0 2px 6px -1px rgba(14, 32, 52, .06);
-  --elevation-2: 0 1px 2px rgba(14, 32, 52, .05), 0 6px 14px -6px rgba(14, 40, 60, .08), 0 16px 32px -16px rgba(10, 60, 80, .12);
-  --elevation-3: 0 2px 4px rgba(14, 32, 52, .05), 0 10px 22px -10px rgba(14, 40, 60, .10), 0 28px 56px -24px rgba(10, 60, 80, .18);
-  --surface-gradient: linear-gradient(180deg, #FFFFFF 0%, #FBFCFD 100%);
-  --surface-gradient-raised: linear-gradient(180deg, #FFFFFF 0%, #F5F8FA 100%);
-  --press: inset 0 2px 5px rgba(14, 32, 52, .12), inset 0 0 0 1px rgba(14, 32, 52, .06);
-  --inset-track: inset 0 1px 2px rgba(14, 32, 52, .10);
-  --ico-hl: rgba(255, 255, 255, .75);
   --canvas-mesh: radial-gradient(1100px 620px at 8% -8%, rgba(14, 159, 142, .05), transparent 62%);
-  --r-sm: 10px; --r-md: 14px; --r-lg: 20px;
-  --ease: cubic-bezier(.2, .8, .2, 1); --t-fast: 120ms; --t-base: 200ms;
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   /* ventilation levels Off / Reduced / Normal / Party (schedule, chart) */
   --lvl-0: var(--ink-4); --lvl-1: var(--info); --lvl-2: var(--accent); --lvl-3: var(--violet);
   --chart-bypass-closed: #A3ADBB; --chart-bypass-open: #10B981;
 }
-
 :root.dark, :root[data-theme="dark"] {
-  color-scheme: dark;
-  --canvas: #090B0F; --surface: #111419; --surface-2: #151920; --sunken: #0C0F13;
-  --line: rgba(255, 255, 255, .065); --line-2: rgba(255, 255, 255, .12);
-  --highlight: inset 0 1px 0 rgba(255, 255, 255, .065), inset 0 0 0 1px rgba(255, 255, 255, .012);
-  --ink: #ECEFF4; --ink-2: #BAC2CE; --ink-3: #848D9C; --ink-4: #5B6372;
-  --accent: #2DD4BF; --accent-ink: #5EEAD4; --accent-soft: rgba(45, 212, 191, .12); --focus: rgba(45, 212, 191, .4);
-  --ok: #34D399; --ok-soft: rgba(52, 211, 153, .12);
-  --warn: #FBBF24; --warn-soft: rgba(251, 191, 36, .12);
-  --alert: #FB7185; --alert-soft: rgba(251, 113, 133, .12);
-  --info: #60A5FA; --info-soft: rgba(96, 165, 250, .12);
-  --idle: #8B95A7; --violet: #A78BFA;
-  --elevation-1: 0 1px 2px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .015);
-  --elevation-2: 0 2px 4px rgba(0, 0, 0, .5), 0 14px 30px -12px rgba(0, 0, 0, .75);
-  --elevation-3: 0 4px 10px rgba(0, 0, 0, .5), 0 26px 52px -18px rgba(0, 0, 0, .85), 0 0 0 1px rgba(255, 255, 255, .025);
-  --surface-gradient: linear-gradient(180deg, #161B22 0%, #11151B 100%);
-  --surface-gradient-raised: linear-gradient(180deg, #1D232C 0%, #171C24 100%);
-  --press: inset 0 2px 6px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(255, 255, 255, .03);
-  --inset-track: inset 0 1px 3px rgba(0, 0, 0, .55);
-  --ico-hl: rgba(255, 255, 255, .09);
+  --violet: #A78BFA;
   --canvas-mesh: radial-gradient(1100px 620px at 8% -8%, rgba(45, 212, 191, .04), transparent 62%);
   --chart-bypass-closed: #475569; --chart-bypass-open: #34D399;
 }
@@ -289,57 +255,33 @@ input[type="file"] { color: var(--ink-3); font: inherit; font-size: 13px; margin
 
 @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } button, .level-btn { transition: none; } }
 
-/* Wall Display embed mode: the iPad panel (wall-display2) shows this page in an iframe of the start page, in a
-   transparent web view over its own dark gradient. Gated on html[data-embed="wall-display"] (the panel injects it,
-   index.html also sets it for the "WallDisplay/" user agent); normal browsers are unaffected. As in home-portal. */
-/* The panel's tokens; the app injects them, these literals are the fallback at zero specificity so the injected
-   ones win. */
-:where(:root[data-embed="wall-display"]) {
-  --wd-backdrop: radial-gradient(1400px circle at top right, rgba(255, 255, 255, .18), transparent 50%), linear-gradient(to bottom right, rgba(255, 158, 102, .55), rgba(184, 89, 158, .55)), #000;
-  --wd-surface: rgba(28, 28, 30, .38);
-  --wd-surface-filter: blur(24px) saturate(180%);
-  --wd-surface-raised: rgba(44, 44, 46, .55);
-  --wd-stroke: rgba(255, 255, 255, .08);
-  --wd-stroke-active: rgba(255, 255, 255, .16);
-  --wd-radius-card: 20px; --wd-radius-tile: 18px; --wd-radius-control: 12px;
-  --wd-page-padding: 20px; --wd-gap: 16px; --wd-card-padding: 18px; --wd-tile-padding: 16px;
-  --wd-text: #ffffff; --wd-text-secondary: rgba(235, 235, 245, .6); --wd-text-tertiary: rgba(235, 235, 245, .3);
-  --wd-accent: rgba(10, 132, 255, 1);
-  --wd-font: -apple-system, system-ui, sans-serif;
-  --wd-title-size: 34px; --wd-tile-title-size: 16px; --wd-tap-target: 44px;
-}
+/* Wall Display embed mode for this page's own components (the tokens, the
+   transparent page, the top bar and the generic card/seg/ico rules come from
+   @mqtt-home/ui/embed.css). */
 :root[data-embed="wall-display"] {
-  color-scheme: dark;
-  --canvas: transparent; --canvas-mesh: none;
-  --surface: var(--wd-surface); --surface-2: var(--wd-surface-raised); --sunken: var(--wd-surface-raised);
-  --surface-gradient: var(--wd-surface); --surface-gradient-raised: var(--wd-surface);
-  --line: var(--wd-stroke); --line-2: var(--wd-stroke);
-  --highlight: 0 0 #0000;
-  --elevation-1: 0 0 #0000; --elevation-2: 0 0 #0000; --elevation-3: 0 0 #0000;
-  --press: 0 0 #0000; --inset-track: 0 0 #0000; --ico-hl: transparent;
-  --ink: var(--wd-text); --ink-2: var(--wd-text-secondary); --ink-3: var(--wd-text-secondary); --ink-4: var(--wd-text-tertiary);
-  --accent: var(--wd-accent); --accent-ink: var(--wd-accent);
-  --accent-soft: color-mix(in srgb, var(--wd-accent) 16%, transparent); --focus: color-mix(in srgb, var(--wd-accent) 40%, transparent);
-  --r-lg: var(--wd-radius-card); --r-md: var(--wd-radius-tile); --r-sm: var(--wd-radius-control);
+  --r-sm: var(--wd-radius-control);
   /* the levels' data colour stays (it named the accent) */
   --lvl-2: #2DD4BF;
 }
-:root[data-embed="wall-display"], :root[data-embed="wall-display"] body, :root[data-embed="wall-display"] #app { background: transparent; }
-:root[data-embed="wall-display"] body { font-family: var(--wd-font); }
-:root[data-embed="wall-display"] :is(.top-bar, .encoder-bar) { background: transparent; border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
-:root[data-embed="wall-display"] :is(.card, .modal, .tl-ctx) {
+:root[data-embed="wall-display"] #app { background: transparent; }
+:root[data-embed="wall-display"] .encoder-bar { background: transparent; border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+:root[data-embed="wall-display"] :is(.modal, .tl-ctx) {
   background: var(--wd-surface); border: 1px solid var(--wd-stroke); box-shadow: none;
   backdrop-filter: var(--wd-surface-filter); -webkit-backdrop-filter: var(--wd-surface-filter);
 }
 :root[data-embed="wall-display"] :is(.modal, .tl-ctx, .tl-tooltip, .chart-tooltip, .tl-drag-time) { background: rgba(28, 28, 30, .82); border-color: var(--wd-stroke); box-shadow: none; }
-:root[data-embed="wall-display"] :is(.fig, .level-buttons, .days, .seg, button, label.btn, input[type="text"], input[type="password"], input[type="number"], select) {
+:root[data-embed="wall-display"] :is(.fig, .level-buttons, .days, button, label.btn, input[type="text"], input[type="password"], input[type="number"], select) {
   background: var(--wd-surface-raised); border-color: var(--wd-stroke); border-radius: var(--wd-radius-control); box-shadow: none;
 }
 :root[data-embed="wall-display"] :is(.app-tabs button, .seg button, .legend-toggle, .level-btn) { background: none; box-shadow: none; }
 :root[data-embed="wall-display"] .app-tabs button { border-color: transparent; border-radius: 0; }
 :root[data-embed="wall-display"] :is(.seg button[aria-pressed="true"], .level-btn.active) { background: var(--wd-stroke-active); color: var(--wd-text); box-shadow: none; }
 :root[data-embed="wall-display"] button.primary { background: var(--wd-accent); color: #fff; }
-:root[data-embed="wall-display"] .ico { background: transparent; box-shadow: none; }
 :root[data-embed="wall-display"] .app-tabs button.active { border-color: var(--wd-text); }
 :root[data-embed="wall-display"] :is(.seg button, button.sm) { min-height: var(--wd-tap-target); height: auto; }
 :root[data-embed="wall-display"] button:active { transform: none; }
+/* where this page's embed look differs from the package's generic rules */
+:root[data-embed="wall-display"] .top-bar { padding-top: env(safe-area-inset-top); }
+:root[data-embed="wall-display"] .app-head { padding-top: 8px; }
+:root[data-embed="wall-display"] label.btn { backdrop-filter: none; -webkit-backdrop-filter: none; }
+:root[data-embed="wall-display"] .seg button { min-width: 38px; }
